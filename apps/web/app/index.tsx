@@ -3,17 +3,20 @@
  *
  * The main landing screen for the web application.
  * Redirects to setup wizard if server is not configured.
+ * Redirects to login if not authenticated.
  */
 
 import { useEffect } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { BRANDING } from '@mediaserver/core';
 import { useSetupStatus } from '@mediaserver/api-client';
+import { useAuth } from '../src/hooks/useAuth';
 
 export default function WebHomeScreen() {
-  const { data: setupStatus, isLoading, error } = useSetupStatus();
+  const { data: setupStatus, isLoading: setupLoading, error } = useSetupStatus();
+  const { isAuthenticated, isInitialized, user, logout } = useAuth();
 
   // Redirect to setup if not complete
   useEffect(() => {
@@ -22,11 +25,18 @@ export default function WebHomeScreen() {
     }
   }, [setupStatus]);
 
-  // Show loading while checking setup status
-  if (isLoading) {
+  // Redirect to login if not authenticated (after setup is complete)
+  useEffect(() => {
+    if (isInitialized && !isAuthenticated && setupStatus?.isComplete) {
+      router.replace('/auth/login');
+    }
+  }, [isAuthenticated, isInitialized, setupStatus]);
+
+  // Show loading while checking setup status or auth
+  if (setupLoading || !isInitialized) {
     return (
       <SafeAreaView className="flex-1 bg-background items-center justify-center">
-        <ActivityIndicator size="large" color="#f97316" />
+        <ActivityIndicator size="large" color="#6366f1" />
         <Text className="text-zinc-500 mt-4">Loading...</Text>
       </SafeAreaView>
     );
@@ -52,8 +62,16 @@ export default function WebHomeScreen() {
     );
   }
 
-  // If setup is complete, show main content
-  // TODO: Replace with actual home screen content
+  // Show loading if redirecting to login
+  if (!isAuthenticated) {
+    return (
+      <SafeAreaView className="flex-1 bg-background items-center justify-center">
+        <ActivityIndicator size="large" color="#6366f1" />
+      </SafeAreaView>
+    );
+  }
+
+  // If setup is complete and authenticated, show main content
   return (
     <SafeAreaView className="flex-1 bg-background">
       <View className="flex-1 items-center justify-center px-8">
@@ -64,8 +82,19 @@ export default function WebHomeScreen() {
           {BRANDING.tagline}
         </Text>
         <Text className="text-lg text-zinc-500 mt-8 text-center">
-          Welcome back! Your media server is ready.
+          Welcome back, {user?.displayName || 'User'}!
         </Text>
+        <Text className="text-sm text-zinc-600 mt-2">
+          Your media server is ready.
+        </Text>
+
+        {/* Logout button */}
+        <Pressable
+          onPress={logout}
+          className="mt-8 px-6 py-3 rounded-lg bg-zinc-800 active:bg-zinc-700"
+        >
+          <Text className="text-zinc-300">Sign out</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );

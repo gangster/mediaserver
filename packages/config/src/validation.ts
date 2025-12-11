@@ -46,13 +46,32 @@ export const loginInputSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
-/** Registration input */
+/** Login form schema (same as API for login) */
+export const loginFormSchema = loginInputSchema;
+export type LoginFormInput = z.infer<typeof loginFormSchema>;
+
+/** Registration input (API) */
 export const registerInputSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   displayName: displayNameSchema,
   inviteCode: z.string().optional(),
 });
+
+/** Registration form schema (frontend - includes confirmPassword) */
+export const registerFormSchema = z
+  .object({
+    email: emailSchema,
+    password: passwordSchema,
+    confirmPassword: z.string().min(1, 'Please confirm your password'),
+    displayName: displayNameSchema,
+    inviteCode: z.string().optional(),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+export type RegisterFormInput = z.infer<typeof registerFormSchema>;
 
 /** Refresh token input */
 export const refreshTokenInputSchema = z.object({

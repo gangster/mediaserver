@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
     "@mediaserver/api-client": "workspace:*",
+    "@mediaserver/config": "workspace:^",
     "@mediaserver/core": "workspace:*",
     "@mediaserver/ui": "workspace:*",
     "@react-navigation/bottom-tabs": "^7.0.0",
@@ -29,6 +31,7 @@
     "nativewind": "^4.0.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "react-hook-form": "^7.68.0",
     "react-native": "0.76.0",
     "react-native-gesture-handler": "~2.20.0",
     "react-native-reanimated": "~3.16.0",
@@ -37,6 +40,7 @@
     "react-native-web": "~0.19.0",
     "react-native-worklets": "^0.7.0",
     "superjson": "^2.2.0",
+    "zod": "^4.1.13",
     "zustand": "^4.5.0"
   },
   "devDependencies": {

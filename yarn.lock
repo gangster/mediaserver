@@ -2758,6 +2758,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@hookform/resolvers@npm:^5.2.2":
+  version: 5.2.2
+  resolution: "@hookform/resolvers@npm:5.2.2"
+  dependencies:
+    "@standard-schema/utils": ^0.3.0
+  peerDependencies:
+    react-hook-form: ^7.55.0
+  checksum: 131b1c4c763949164825634058fbe126041f1375622fddcb4f833af57e89665a2672474c778e604583d7447cff8252ab7df460240269e91eb5683646a3c9bebb
+  languageName: node
+  linkType: hard
+
 "@humanwhocodes/config-array@npm:^0.13.0":
   version: 0.13.0
   resolution: "@humanwhocodes/config-array@npm:0.13.0"
@@ -3227,7 +3238,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@mediaserver/config@workspace:*, @mediaserver/config@workspace:packages/config":
+"@mediaserver/config@workspace:*, @mediaserver/config@workspace:^, @mediaserver/config@workspace:packages/config":
   version: 0.0.0-use.local
   resolution: "@mediaserver/config@workspace:packages/config"
   dependencies:
@@ -3400,7 +3411,9 @@ __metadata:
   resolution: "@mediaserver/web@workspace:apps/web"
   dependencies:
     "@babel/core": ^7.24.0
+    "@hookform/resolvers": ^5.2.2
     "@mediaserver/api-client": "workspace:*"
+    "@mediaserver/config": "workspace:^"
     "@mediaserver/core": "workspace:*"
     "@mediaserver/ui": "workspace:*"
     "@react-navigation/bottom-tabs": ^7.0.0
@@ -3421,6 +3434,7 @@ __metadata:
     nativewind: ^4.0.0
     react: 18.3.1
     react-dom: 18.3.1
+    react-hook-form: ^7.68.0
     react-native: 0.76.0
     react-native-gesture-handler: ~2.20.0
     react-native-reanimated: ~3.16.0
@@ -3431,6 +3445,7 @@ __metadata:
     superjson: ^2.2.0
     tailwindcss: ^3.4.0
     typescript: ^5.4.0
+    zod: ^4.1.13
     zustand: ^4.5.0
   languageName: unknown
   linkType: soft
@@ -4626,6 +4641,13 @@ __metadata:
   dependencies:
     "@sinonjs/commons": ^3.0.0
   checksum: 614d30cb4d5201550c940945d44c9e0b6d64a888ff2cd5b357f95ad6721070d6b8839cd10e15b76bf5e14af0bcc1d8f9ec00d49a46318f1f669a4bec1d7f3148
+  languageName: node
+  linkType: hard
+
+"@standard-schema/utils@npm:^0.3.0":
+  version: 0.3.0
+  resolution: "@standard-schema/utils@npm:0.3.0"
+  checksum: 7084f875d322792f2e0a5904009434c8374b9345b09ba89828b68fd56fa3c2b366d35bf340d9e8c72736ef01793c2f70d350c372ed79845dc3566c58d34b4b51
   languageName: node
   linkType: hard
 
@@ -12702,6 +12724,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"react-hook-form@npm:^7.68.0":
+  version: 7.68.0
+  resolution: "react-hook-form@npm:7.68.0"
+  peerDependencies:
+    react: ^16.8.0 || ^17 || ^18 || ^19
+  checksum: 576c4d492cfbe3ec756f10aa0a3262cfd40d497470e400907274d5047712715e90c83ced407d55d4ac62a191a305869800c14116377eea79355639e4389bbf4a
+  languageName: node
+  linkType: hard
+
 "react-is@npm:^16.13.0, react-is@npm:^16.13.1, react-is@npm:^16.7.0":
   version: 16.13.1
   resolution: "react-is@npm:16.13.1"
@@ -15634,6 +15665,13 @@ __metadata:
   version: 3.25.76
   resolution: "zod@npm:3.25.76"
   checksum: c9a403a62b329188a5f6bd24d5d935d2bba345f7ab8151d1baa1505b5da9f227fb139354b043711490c798e91f3df75991395e40142e6510a4b16409f302b849
+  languageName: node
+  linkType: hard
+
+"zod@npm:^4.1.13":
+  version: 4.1.13
+  resolution: "zod@npm:4.1.13"
+  checksum: e5459280d46567df0adc188b0c687d425e616a206d4a73ee3bacf62d246f5546e24ef45790c7c4762d3ce7659c5e41052a29445d32d0d272410be9fe23162d03
   languageName: node
   linkType: hard
 

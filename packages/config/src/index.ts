@@ -29,7 +29,9 @@ export {
   sortDirectionSchema,
   // Auth
   loginInputSchema,
+  loginFormSchema,
   registerInputSchema,
+  registerFormSchema,
   refreshTokenInputSchema,
   changePasswordInputSchema,
   // User
@@ -65,4 +67,7 @@ export {
 
 // Re-export zod for convenience
 export { z } from 'zod';
+
+// Type exports
+export type { LoginFormInput, RegisterFormInput } from './validation.js';
 
