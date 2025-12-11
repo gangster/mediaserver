@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "mediaserver Web",
+    "slug": "mediaserver-web",
+    "version": "1.0.0",
+    "userInterfaceStyle": "dark",
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "scheme": "mediaserver",
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
+

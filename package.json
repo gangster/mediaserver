@@ -1,0 +1,51 @@
+{
+  "name": "mediaserver",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "yarn@3.8.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "nx run-many -t dev",
+    "build": "nx run-many -t build",
+    "test": "nx run-many -t test",
+    "lint": "nx run-many -t lint",
+    "typecheck": "nx run-many -t typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:migrate": "nx run @mediaserver/db:db:migrate",
+    "db:generate": "nx run @mediaserver/db:db:generate",
+    "db:studio": "nx run @mediaserver/db:db:studio",
+    "clean": "nx reset && rm -rf node_modules **/node_modules **/dist **/.turbo",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@nx/js": "^22.2.1",
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.34.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "husky": "^9.0.0",
+    "lint-staged": "^15.2.0",
+    "nx": "^22.2.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
