@@ -204,7 +204,7 @@ export default function Login() {
 
           {/* Register link */}
           <View className="mt-8 flex-row justify-center">
-            <Text className="text-zinc-400">Don't have an account? </Text>
+            <Text className="text-zinc-400">Don&apos;t have an account? </Text>
             <Link href="/auth/register" asChild>
               <Pressable>
                 <Text className="text-indigo-400">Create one</Text>
