@@ -40,9 +40,10 @@ stop_valkey() {
 
 start_server() {
   cd "$ROOT_DIR/apps/server"
-  node --import tsx src/main.ts > "$DEV_DIR/server.log" 2>&1 &
+  # Use tsx watch for hot reload
+  npx tsx watch src/main.ts > "$DEV_DIR/server.log" 2>&1 &
   echo $! > "$DEV_DIR/server.pid"
-  echo -e "${GREEN}●${NC} Server started (PID: $(cat "$DEV_DIR/server.pid"))"
+  echo -e "${GREEN}●${NC} Server started with hot reload (PID: $(cat "$DEV_DIR/server.pid"))"
 }
 
 start_web() {
