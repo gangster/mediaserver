@@ -89,10 +89,24 @@ import { Button, ButtonText, Input, InputField, Spinner, Card } from '../src/com
 - **Feedback**: `Spinner`, `Badge`, `Toast`
 - **Layout**: `Card`, `Modal`, `ModalBackdrop`, `ModalContent`, `ModalHeader`, `ModalBody`, `ModalFooter`
 
-**Adding new components:**
+**If a component you need isn't installed, add it:**
 ```bash
 nix develop -c bash -c "cd apps/web && npx gluestack-ui add <component-name>"
 ```
+
+Common components to add as needed:
+- `npx gluestack-ui add accordion`
+- `npx gluestack-ui add alert`
+- `npx gluestack-ui add avatar`
+- `npx gluestack-ui add menu`
+- `npx gluestack-ui add popover`
+- `npx gluestack-ui add progress`
+- `npx gluestack-ui add slider`
+- `npx gluestack-ui add tabs`
+- `npx gluestack-ui add textarea`
+- `npx gluestack-ui add tooltip`
+
+**⚠️ IMPORTANT:** Never build custom UI components (buttons, inputs, modals, etc.) from scratch. Always check if gluestack has the component first and install it if needed. This ensures consistent styling and accessibility across the app.
 
 ### Nix Development Environment
 
