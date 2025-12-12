@@ -389,6 +389,47 @@ When implementing features, reference the forreel project at `/Users/josh/play/f
 - forreel uses standard HTML/CSS → mediaserver uses React Native primitives/NativeWind
 - forreel uses standard Tailwind → mediaserver uses NativeWind (with limitations noted above)
 
+### Adapting Forreel Components
+
+When porting components from forreel:
+
+1. **Replace HTML elements with React Native primitives:**
+   - `div` → `View`
+   - `span`, `p`, `h1-h6` → `Text`
+   - `button` → `Pressable`
+   - `input` → `TextInput`
+   - `img` → `Image`
+   - `select` → Custom dropdown with `Pressable` + modal/overlay
+
+2. **Replace React Router with Expo Router:**
+   - `Link` from `react-router-dom` → `Link` from `expo-router`
+   - `useNavigate()` → `useRouter()` with `router.push()`
+   - Route params: `useParams()` → `useLocalSearchParams()`
+
+3. **Replace SVG icons with @expo/vector-icons:**
+   - Import from `@expo/vector-icons` (e.g., `Ionicons`, `Feather`, `MaterialCommunityIcons`)
+   - Use `<Feather name="search" size={20} color="#a1a1aa" />` instead of inline SVGs
+
+4. **Handle CSS Grid → Flexbox:**
+   - Replace `grid grid-cols-*` with `flexDirection: 'row', flexWrap: 'wrap'`
+   - Calculate item widths manually based on `useWindowDimensions()`
+
+5. **Preserve inline styles for web-specific features:**
+   - Use `style={{ ... } as const}` for `backdropFilter`, `boxShadow`, `position: 'fixed'`
+
+## ID Validation
+
+Library IDs and other generated IDs use `nanoid` format (21-character strings), not UUIDs. Use `idSchema` from `@mediaserver/config` for validation instead of `uuidSchema`:
+
+```typescript
+import { idSchema } from '@mediaserver/config';
+
+// In tRPC router
+scan: protectedProcedure
+  .input(z.object({ id: idSchema }))  // ✅ Accepts nanoid
+  .mutation(...)
+```
+
 ## Troubleshooting
 
 ### Styles Not Updating
@@ -406,3 +447,34 @@ style={{ backdropFilter: 'blur(8px)' } as const}
 
 ### useLayoutEffect Warning
 The `useLayoutEffect does nothing on the server` warning is from react-navigation and can be ignored - it doesn't affect client-side functionality.
+
+### Zustand Store Hydration Race Conditions
+When using Zustand's `persist` middleware, the store isn't immediately hydrated from localStorage. API calls that need auth tokens may fire before hydration completes.
+
+**Solution**: Make `getAccessToken()` async and wait for hydration:
+```typescript
+export async function getAccessToken(): Promise<string | null> {
+  // Wait for store hydration
+  if (!useAuthStore.persist.hasHydrated()) {
+    await new Promise<void>((resolve) => {
+      const unsubscribe = useAuthStore.persist.onFinishHydration(() => {
+        unsubscribe();
+        resolve();
+      });
+    });
+  }
+  return useAuthStore.getState().accessToken;
+}
+```
+
+### Browser Cache After Database Reset
+After resetting the database (deleting `mediaserver.db`), the browser may still have stale auth tokens and setup state in localStorage. Clear it:
+```javascript
+localStorage.clear(); location.reload();
+```
+
+### Port Already In Use
+If the server fails with `EADDRINUSE`:
+```bash
+lsof -ti:3000 | xargs kill -9
+```
