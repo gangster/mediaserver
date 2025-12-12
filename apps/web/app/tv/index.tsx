@@ -237,7 +237,7 @@ export default function TVShowsPage() {
 
   return (
     <Layout>
-      <ScrollView style={{ flex: 1, backgroundColor: '#09090b' }}>
+      <ScrollView style={{ flex: 1, backgroundColor: '#18181b' }}>
         <View style={{ paddingHorizontal: 32, paddingVertical: 24 }}>
         {/* Header */}
           <View style={{ marginBottom: 24 }}>

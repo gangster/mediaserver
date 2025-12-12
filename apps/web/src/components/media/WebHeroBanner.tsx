@@ -132,7 +132,7 @@ export function WebHeroBanner({
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: '#09090b',
+              backgroundColor: '#18181b',
             }}
           />
         )}
@@ -177,7 +177,7 @@ export function WebHeroBanner({
             right: 0,
             height: '60%',
             // @ts-expect-error - web-only gradient
-            background: 'linear-gradient(to top, #09090b 0%, #09090b 5%, rgba(9, 9, 11, 0.9) 20%, rgba(9, 9, 11, 0.6) 40%, transparent 100%)',
+            background: 'linear-gradient(to top, #18181b 0%, #18181b 5%, rgba(24, 24, 27, 0.9) 20%, rgba(24, 24, 27, 0.6) 40%, transparent 100%)',
           }}
         />
 
@@ -362,7 +362,7 @@ export function WebHeroBannerSkeleton({
           right: 0,
           bottom: 0,
           // @ts-expect-error - web-only gradient
-          background: 'linear-gradient(to top, #09090b 0%, rgba(39, 39, 42, 0.5) 50%, #27272a 100%)',
+          background: 'linear-gradient(to top, #18181b 0%, rgba(39, 39, 42, 0.5) 50%, #27272a 100%)',
         }}
       />
 

@@ -41,7 +41,7 @@ export function Layout({ children }: LayoutProps) {
   // Don't show navigation on watch pages
   if (isWatchPage) {
     return (
-      <View className="min-h-screen bg-zinc-950">
+      <View className="min-h-screen bg-zinc-900">
         {children}
       </View>
     );
@@ -51,7 +51,7 @@ export function Layout({ children }: LayoutProps) {
   const sidebarWidth = sidebarCollapsed ? 64 : 256;
 
   return (
-    <View className="min-h-screen bg-zinc-950">
+    <View className="min-h-screen bg-zinc-900">
       {/* Desktop Sidebar - hidden on mobile */}
       {isDesktop && <Sidebar onSearch={openSearch} />}
 

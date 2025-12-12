@@ -34,7 +34,7 @@ export default function Login() {
   // Show loading while checking setup status
   if (setupLoading) {
     return (
-      <View className="flex-1 bg-zinc-950 items-center justify-center">
+      <View className="flex-1 bg-zinc-900 items-center justify-center">
         <ActivityIndicator size="large" color="#6366f1" />
       </View>
     );
@@ -56,7 +56,7 @@ export default function Login() {
   };
 
   return (
-    <View className="flex-1 flex-row bg-zinc-950">
+    <View className="flex-1 flex-row bg-zinc-900">
       {/* Left side - branding (hidden on small screens) */}
       <View className="hidden lg:flex w-1/2 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 p-12 justify-between">
         <View>

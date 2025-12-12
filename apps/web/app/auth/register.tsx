@@ -42,7 +42,7 @@ export default function Register() {
   };
 
   return (
-    <View className="flex-1 flex-row bg-zinc-950">
+    <View className="flex-1 flex-row bg-zinc-900">
       {/* Left side - branding (hidden on small screens) */}
       <View className="hidden lg:flex w-1/2 bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-500 p-12 justify-between">
         <View>

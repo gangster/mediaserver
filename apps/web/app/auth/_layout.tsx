@@ -24,7 +24,7 @@ export default function AuthLayout() {
   // If authenticated and initialized, show loading while redirecting
   if (isInitialized && isAuthenticated) {
     return (
-      <View className="flex-1 items-center justify-center bg-zinc-950">
+      <View className="flex-1 items-center justify-center bg-zinc-900">
         <ActivityIndicator size="large" color="#6366f1" />
       </View>
     );
@@ -38,7 +38,7 @@ export default function AuthLayout() {
         headerShown: false,
         animation: 'fade',
         contentStyle: {
-          backgroundColor: '#09090b',
+          backgroundColor: '#18181b',
         },
       }}
     />

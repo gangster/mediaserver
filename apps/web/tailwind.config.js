@@ -9,9 +9,9 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: '#0a0a0f',
-        surface: '#13131a',
-        primary: '#10b981', // emerald-500
+        background: '#18181b', // zinc-900
+        surface: '#27272a',    // zinc-800
+        primary: '#10b981',    // emerald-500
         secondary: '#6366f1',
         error: '#ef4444',
         success: '#10b981',

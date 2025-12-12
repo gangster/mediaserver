@@ -63,7 +63,7 @@ export default function TraktCallback() {
     <View
       style={{
         flex: 1,
-        backgroundColor: '#09090b',
+        backgroundColor: '#18181b',
         justifyContent: 'center',
         alignItems: 'center',
         padding: 24,

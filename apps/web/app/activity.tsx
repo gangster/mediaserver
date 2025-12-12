@@ -341,7 +341,7 @@ export default function ActivityPage() {
   return (
     <Layout>
       <ScrollView
-        style={{ flex: 1, backgroundColor: '#09090b' }}
+        style={{ flex: 1, backgroundColor: '#18181b' }}
         contentContainerStyle={{ padding: isDesktop ? 24 : 16, gap: 24 }}
         refreshControl={
           <RefreshControl

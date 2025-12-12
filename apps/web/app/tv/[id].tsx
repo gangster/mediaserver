@@ -16,7 +16,7 @@ export default function TVShowDetailPage() {
   if (isLoading) {
     return (
       <Layout>
-        <View className="flex-1 bg-zinc-950 items-center justify-center">
+        <View className="flex-1 bg-zinc-900 items-center justify-center">
           <ActivityIndicator size="large" color="#6366f1" />
         </View>
       </Layout>
@@ -26,7 +26,7 @@ export default function TVShowDetailPage() {
   if (error || !show) {
     return (
       <Layout>
-        <View className="flex-1 bg-zinc-950 items-center justify-center px-4">
+        <View className="flex-1 bg-zinc-900 items-center justify-center px-4">
           <Text className="text-white text-xl mb-2">Show not found</Text>
           <Text className="text-zinc-400 text-center">
             The show you're looking for doesn't exist or has been removed.
@@ -51,7 +51,7 @@ export default function TVShowDetailPage() {
 
   return (
     <Layout>
-      <ScrollView className="flex-1 bg-zinc-950">
+      <ScrollView className="flex-1 bg-zinc-900">
         {/* Hero Section with Backdrop */}
         <View className="relative h-[50vh] sm:h-[60vh]">
           {backdropUrl && (

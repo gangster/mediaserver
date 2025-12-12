@@ -1061,7 +1061,7 @@ export default function ServerSettingsPage() {
 
   return (
     <Layout>
-      <ScrollView style={{ flex: 1, backgroundColor: '#09090b' }}>
+      <ScrollView style={{ flex: 1, backgroundColor: '#18181b' }}>
         {/* Header */}
         <View style={{ paddingHorizontal: 24, paddingTop: 32, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#27272a' }}>
           <Text style={{ fontSize: 24, fontWeight: '700', color: '#fff' }}>Server Settings</Text>

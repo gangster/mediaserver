@@ -31,7 +31,7 @@ export default function SearchPage() {
 
   return (
     <Layout>
-      <ScrollView className="flex-1 bg-zinc-950">
+      <ScrollView className="flex-1 bg-zinc-900">
         {/* Header */}
         <View className="px-4 sm:px-6 lg:px-8 pt-8 pb-6">
           <Text className="text-2xl sm:text-3xl font-bold text-white mb-4">

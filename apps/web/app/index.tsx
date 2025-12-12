@@ -252,7 +252,7 @@ export default function WebHomeScreen() {
   // Wait for client-side token check and setup status
   if (!hasCheckedTokens || setupLoading) {
     return (
-      <View className="flex-1 bg-zinc-950 items-center justify-center">
+      <View className="flex-1 bg-zinc-900 items-center justify-center">
         <Spinner size="large" className="text-indigo-500" />
       </View>
     );
@@ -271,7 +271,7 @@ export default function WebHomeScreen() {
   // Show loading while validating tokens
   if (!isInitialized) {
     return (
-      <View className="flex-1 bg-zinc-950 items-center justify-center">
+      <View className="flex-1 bg-zinc-900 items-center justify-center">
         <Spinner size="large" className="text-indigo-500" />
         <Text className="text-zinc-500 mt-4">Validating session...</Text>
       </View>
@@ -294,7 +294,7 @@ export default function WebHomeScreen() {
 
   return (
     <Layout>
-      <ScrollView className="flex-1 bg-zinc-950">
+      <ScrollView className="flex-1 bg-zinc-900">
         {/* Hero Banner */}
         {homePreferences.showHeroBanner && featuredItem && (
           <WebHeroBanner
