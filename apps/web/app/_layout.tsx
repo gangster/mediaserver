@@ -10,6 +10,7 @@ import { StatusBar } from 'expo-status-bar';
 import { ApiProvider, useSetupStatus } from '@mediaserver/api-client';
 import { useAuth } from '../src/hooks/useAuth';
 import { getAccessToken, handleAuthError } from '../src/stores/auth';
+import { GluestackUIProvider } from '../src/components/ui/gluestack-ui-provider';
 
 import '../global.css';
 
@@ -64,20 +65,22 @@ export default function RootLayout() {
   }), []);
 
   return (
-    <ApiProvider config={apiConfig}>
-      <StatusBar style="light" />
-      <AuthGuard>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            animation: 'fade',
-            contentStyle: {
-              backgroundColor: '#09090b',
-            },
-          }}
-        />
-      </AuthGuard>
-    </ApiProvider>
+    <GluestackUIProvider mode="dark">
+      <ApiProvider config={apiConfig}>
+        <StatusBar style="light" />
+        <AuthGuard>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              animation: 'fade',
+              contentStyle: {
+                backgroundColor: '#09090b',
+              },
+            }}
+          />
+        </AuthGuard>
+      </ApiProvider>
+    </GluestackUIProvider>
   );
 }
 
