@@ -19,7 +19,6 @@ export interface UseShowsOptions {
  * Hook for fetching a list of TV shows.
  */
 export function useShows(options?: UseShowsOptions) {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.list.useQuery(options ?? {});
 }
 
@@ -27,7 +26,6 @@ export function useShows(options?: UseShowsOptions) {
  * Hook for infinite show list.
  */
 export function useInfiniteShows(options?: Omit<UseShowsOptions, 'cursor'>) {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.list.useInfiniteQuery(options ?? {}, {
     getNextPageParam: (lastPage: { nextCursor: string | null }) => lastPage.nextCursor,
   });
@@ -37,7 +35,6 @@ export function useInfiniteShows(options?: Omit<UseShowsOptions, 'cursor'>) {
  * Hook for fetching a single TV show by ID.
  */
 export function useShow(id: string, enabled = true) {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.get.useQuery({ id }, { enabled });
 }
 
@@ -45,7 +42,6 @@ export function useShow(id: string, enabled = true) {
  * Hook for fetching a season with episodes.
  */
 export function useSeason(showId: string, seasonNumber: number, enabled = true) {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.getSeason.useQuery({ showId, seasonNumber }, { enabled });
 }
 
@@ -53,7 +49,6 @@ export function useSeason(showId: string, seasonNumber: number, enabled = true) 
  * Hook for fetching a single episode.
  */
 export function useEpisode(id: string, enabled = true) {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.getEpisode.useQuery({ id }, { enabled });
 }
 
@@ -61,7 +56,6 @@ export function useEpisode(id: string, enabled = true) {
  * Hook for fetching the next episode to watch.
  */
 export function useNextEpisode(showId: string, enabled = true) {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.getNextEpisode.useQuery({ showId }, { enabled });
 }
 
@@ -69,7 +63,6 @@ export function useNextEpisode(showId: string, enabled = true) {
  * Hook for fetching recently added shows.
  */
 export function useRecentShows(limit = 10) {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.recentlyAdded.useQuery({ limit });
 }
 
@@ -77,7 +70,6 @@ export function useRecentShows(limit = 10) {
  * Hook for fetching show genres.
  */
 export function useShowGenres() {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.genres.useQuery();
 }
 
@@ -85,7 +77,6 @@ export function useShowGenres() {
  * Hook for marking an episode as watched.
  */
 export function useMarkEpisodeWatched() {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.markEpisodeWatched.useMutation();
 }
 
@@ -93,7 +84,6 @@ export function useMarkEpisodeWatched() {
  * Hook for marking an episode as unwatched.
  */
 export function useMarkEpisodeUnwatched() {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.markEpisodeUnwatched.useMutation();
 }
 
@@ -101,7 +91,6 @@ export function useMarkEpisodeUnwatched() {
  * Hook for marking a whole season as watched.
  */
 export function useMarkSeasonWatched() {
-  // @ts-expect-error - Router not yet defined
   return trpc.shows.markSeasonWatched.useMutation();
 }
 

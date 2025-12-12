@@ -2,7 +2,6 @@
  * Media card component for displaying movies, shows, and episodes.
  */
 
-import React from 'react';
 import { View, Text, Pressable, Image, type PressableProps } from 'react-native';
 import { cn } from '../utils/cn.js';
 import { isTV } from '../utils/platform.js';
@@ -102,7 +101,7 @@ export function MediaCard({
       )}
       {...props}
     >
-      {({ pressed }) => (
+      {({ pressed: _pressed }) => (
         <View style={{ width: config.poster.width }}>
           {/* Poster container */}
           <View
@@ -245,7 +244,7 @@ export function EpisodeCard({
       )}
       {...props}
     >
-      {({ pressed }) => (
+      {({ pressed: _pressed }) => (
         <View className="flex-row bg-zinc-900 rounded-xl overflow-hidden">
           {/* Still image */}
           <View

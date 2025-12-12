@@ -8,8 +8,6 @@ import {
   Text,
   ActivityIndicator,
   type PressableProps,
-  type ViewStyle,
-  type TextStyle,
 } from 'react-native';
 import { cn } from '../utils/cn.js';
 import { isTV } from '../utils/platform.js';
@@ -135,7 +133,7 @@ export function Button({
       })}
       {...props}
     >
-      {({ pressed }) => (
+      {({ pressed: _pressed }) => (
         <>
           {loading ? (
             <ActivityIndicator

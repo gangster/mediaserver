@@ -86,7 +86,6 @@ export function MediaGrid<T extends MediaGridItem>({
   renderCustomItem,
   ...props
 }: MediaGridProps<T>) {
-  const tv = isTV();
   const columns = columnsProp ?? calculateColumns(cardSize, gap);
 
   // Render skeleton items when loading
@@ -103,9 +102,10 @@ export function MediaGrid<T extends MediaGridItem>({
     );
   }
 
-  const renderItem = ({ item, index }: { item: T; index: number }) => {
+  const renderItem = ({ item, index }: { item: T; index: number }): React.ReactElement | null => {
     if (renderCustomItem) {
-      return renderCustomItem(item, index);
+      const customResult = renderCustomItem(item, index);
+      return customResult as React.ReactElement | null;
     }
 
     const posterUrl = item.posterPath
@@ -148,7 +148,7 @@ export function MediaGrid<T extends MediaGridItem>({
 export function SimpleMediaGrid<T extends MediaGridItem>({
   data,
   cardSize = 'md',
-  columns = 3,
+  columns: _columns = 3,
   gap = 16,
   onItemPress,
   className,

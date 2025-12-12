@@ -23,7 +23,6 @@ import { trpc } from '../client.js';
  * };
  */
 export function useLogin() {
-  // @ts-expect-error - Router not yet defined
   return trpc.auth.login.useMutation();
 }
 
@@ -31,7 +30,6 @@ export function useLogin() {
  * Hook for registering a new user.
  */
 export function useRegister() {
-  // @ts-expect-error - Router not yet defined
   return trpc.auth.register.useMutation();
 }
 
@@ -39,7 +37,6 @@ export function useRegister() {
  * Hook for logging out.
  */
 export function useLogout() {
-  // @ts-expect-error - Router not yet defined
   return trpc.auth.logout.useMutation();
 }
 
@@ -47,7 +44,6 @@ export function useLogout() {
  * Hook for refreshing auth tokens.
  */
 export function useRefreshToken() {
-  // @ts-expect-error - Router not yet defined
   return trpc.auth.refresh.useMutation();
 }
 
@@ -55,7 +51,6 @@ export function useRefreshToken() {
  * Hook for getting the current user.
  */
 export function useCurrentUser() {
-  // @ts-expect-error - Router not yet defined
   return trpc.user.me.useQuery();
 }
 

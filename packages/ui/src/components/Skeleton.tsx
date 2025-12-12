@@ -2,7 +2,7 @@
  * Skeleton loading placeholder component.
  */
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { View, Animated, type ViewStyle, type DimensionValue } from 'react-native';
 import { cn } from '../utils/cn.js';
 

@@ -19,7 +19,6 @@ export interface UseMoviesOptions {
  * Hook for fetching a list of movies.
  */
 export function useMovies(options?: UseMoviesOptions) {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.list.useQuery(options ?? {});
 }
 
@@ -27,7 +26,6 @@ export function useMovies(options?: UseMoviesOptions) {
  * Hook for infinite movie list.
  */
 export function useInfiniteMovies(options?: Omit<UseMoviesOptions, 'cursor'>) {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.list.useInfiniteQuery(options ?? {}, {
     getNextPageParam: (lastPage: { nextCursor: string | null }) => lastPage.nextCursor,
   });
@@ -37,7 +35,6 @@ export function useInfiniteMovies(options?: Omit<UseMoviesOptions, 'cursor'>) {
  * Hook for fetching a single movie by ID.
  */
 export function useMovie(id: string, enabled = true) {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.get.useQuery({ id }, { enabled });
 }
 
@@ -45,7 +42,6 @@ export function useMovie(id: string, enabled = true) {
  * Hook for fetching recently added movies.
  */
 export function useRecentMovies(limit = 10) {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.recentlyAdded.useQuery({ limit });
 }
 
@@ -53,7 +49,6 @@ export function useRecentMovies(limit = 10) {
  * Hook for fetching movie genres.
  */
 export function useMovieGenres() {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.genres.useQuery();
 }
 
@@ -61,7 +56,6 @@ export function useMovieGenres() {
  * Hook for fetching movie years.
  */
 export function useMovieYears() {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.years.useQuery();
 }
 
@@ -69,7 +63,6 @@ export function useMovieYears() {
  * Hook for marking a movie as watched.
  */
 export function useMarkMovieWatched() {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.markWatched.useMutation();
 }
 
@@ -77,7 +70,6 @@ export function useMarkMovieWatched() {
  * Hook for marking a movie as unwatched.
  */
 export function useMarkMovieUnwatched() {
-  // @ts-expect-error - Router not yet defined
   return trpc.movies.markUnwatched.useMutation();
 }
 

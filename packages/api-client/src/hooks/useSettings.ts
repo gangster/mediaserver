@@ -8,7 +8,6 @@ import { trpc } from '../client.js';
  * Hook for getting privacy settings.
  */
 export function usePrivacySettings() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.getPrivacy.useQuery();
 }
 
@@ -16,7 +15,6 @@ export function usePrivacySettings() {
  * Hook for updating privacy settings.
  */
 export function useUpdatePrivacySettings() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.updatePrivacy.useMutation();
 }
 
@@ -24,7 +22,6 @@ export function useUpdatePrivacySettings() {
  * Hook for getting license info.
  */
 export function useLicense() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.getLicense.useQuery();
 }
 
@@ -32,7 +29,6 @@ export function useLicense() {
  * Hook for activating a license.
  */
 export function useActivateLicense() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.activateLicense.useMutation();
 }
 
@@ -40,7 +36,6 @@ export function useActivateLicense() {
  * Hook for getting remote access config.
  */
 export function useRemoteAccessConfig() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.getRemoteAccess.useQuery();
 }
 
@@ -48,7 +43,6 @@ export function useRemoteAccessConfig() {
  * Hook for updating remote access config.
  */
 export function useUpdateRemoteAccessConfig() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.updateRemoteAccess.useMutation();
 }
 
@@ -56,7 +50,6 @@ export function useUpdateRemoteAccessConfig() {
  * Hook for getting provider configurations.
  */
 export function useProviderConfigs() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.getProviders.useQuery();
 }
 
@@ -64,7 +57,6 @@ export function useProviderConfigs() {
  * Hook for updating a provider configuration.
  */
 export function useUpdateProviderConfig() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.updateProvider.useMutation();
 }
 
@@ -72,7 +64,6 @@ export function useUpdateProviderConfig() {
  * Hook for getting server statistics.
  */
 export function useServerStats() {
-  // @ts-expect-error - Router not yet defined
   return trpc.settings.stats.useQuery();
 }
 

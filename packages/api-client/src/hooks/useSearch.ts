@@ -15,7 +15,6 @@ export interface UseSearchOptions {
  * Hook for global search.
  */
 export function useSearch(options: UseSearchOptions, enabled = true) {
-  // @ts-expect-error - Router not yet defined
   return trpc.search.search.useQuery(options, { 
     enabled: enabled && options.query.length > 0 
   });
@@ -25,7 +24,6 @@ export function useSearch(options: UseSearchOptions, enabled = true) {
  * Hook for search suggestions (autocomplete).
  */
 export function useSearchSuggestions(query: string, limit = 5) {
-  // @ts-expect-error - Router not yet defined
   return trpc.search.suggestions.useQuery(
     { query, limit },
     { enabled: query.length > 0 }
@@ -36,7 +34,6 @@ export function useSearchSuggestions(query: string, limit = 5) {
  * Hook for trending/popular items.
  */
 export function useTrending(limit = 10) {
-  // @ts-expect-error - Router not yet defined
   return trpc.search.trending.useQuery({ limit });
 }
 

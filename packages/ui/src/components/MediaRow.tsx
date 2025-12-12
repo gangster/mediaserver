@@ -8,7 +8,6 @@ import {
   Text,
   ScrollView,
   Pressable,
-  type ScrollViewProps,
   Animated,
 } from 'react-native';
 import { cn } from '../utils/cn.js';
@@ -100,7 +99,7 @@ export function MediaRow<T extends MediaRowItem>({
   const scrollViewRef = useRef<ScrollView>(null);
 
   // TV: Track focused index for scroll-into-view
-  const [focusedIndex, setFocusedIndex] = React.useState(-1);
+  const [focusedIndex, _setFocusedIndex] = React.useState(-1);
 
   const renderItem = (item: T, index: number) => {
     if (renderCustomItem) {

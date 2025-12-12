@@ -19,10 +19,15 @@ import superjson from 'superjson';
 export interface AppRouter {}
 
 /**
+ * Type for the tRPC React client
+ */
+export type TRPCClient = ReturnType<typeof createTRPCReact<AppRouter>>;
+
+/**
  * tRPC React hooks.
  * Use these throughout the application for API calls.
  */
-export const trpc = createTRPCReact<AppRouter>();
+export const trpc: TRPCClient = createTRPCReact<AppRouter>();
 
 /**
  * API client configuration options.

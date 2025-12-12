@@ -2,7 +2,6 @@
  * Progress bar component for watch progress and loading states.
  */
 
-import React from 'react';
 import { View, Text, type DimensionValue } from 'react-native';
 import { cn } from '../utils/cn.js';
 

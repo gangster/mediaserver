@@ -145,8 +145,9 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
 
 /**
  * Applies environment variable overrides to config.
+ * Uses z.input type since we're building partial config before validation.
  */
-function applyEnvOverrides(config: Partial<Config>): Partial<Config> {
+function applyEnvOverrides(config: z.input<typeof configSchema>): z.input<typeof configSchema> {
   const result = { ...config };
 
   // PORT -> config.server.port
@@ -192,7 +193,7 @@ function applyEnvOverrides(config: Partial<Config>): Partial<Config> {
  * @param configPath - Optional explicit path to config file
  */
 export async function loadConfig(configPath?: string): Promise<Config> {
-  let config: Partial<Config> = {};
+  let config: z.input<typeof configSchema> = {};
 
   // Determine config file paths to try
   const configPaths = configPath
@@ -205,7 +206,7 @@ export async function loadConfig(configPath?: string): Promise<Config> {
       if (fs.existsSync(filePath)) {
         const content = fs.readFileSync(filePath, 'utf-8');
         const parsed = filePath.endsWith('.json') ? JSON.parse(content) : parseYaml(content);
-        config = deepMerge(config as Record<string, unknown>, parsed) as Partial<Config>;
+        config = deepMerge(config as Record<string, unknown>, parsed) as z.input<typeof configSchema>;
         break;
       }
     } catch (error) {
@@ -234,7 +235,7 @@ export async function loadConfig(configPath?: string): Promise<Config> {
  * Synchronous config loading for simpler use cases.
  */
 export function loadConfigSync(configPath?: string): Config {
-  let config: Partial<Config> = {};
+  let config: z.input<typeof configSchema> = {};
 
   const configPaths = configPath
     ? [configPath]
@@ -245,7 +246,7 @@ export function loadConfigSync(configPath?: string): Config {
       if (fs.existsSync(filePath)) {
         const content = fs.readFileSync(filePath, 'utf-8');
         const parsed = filePath.endsWith('.json') ? JSON.parse(content) : parseYaml(content);
-        config = deepMerge(config as Record<string, unknown>, parsed) as Partial<Config>;
+        config = deepMerge(config as Record<string, unknown>, parsed) as z.input<typeof configSchema>;
         break;
       }
     } catch (error) {

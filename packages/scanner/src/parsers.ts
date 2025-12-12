@@ -97,7 +97,8 @@ function normalizeFilename(filename: string): string {
  */
 function extractYear(str: string): number | undefined {
   const yearMatch = str.match(/\b(19\d{2}|20\d{2})\b/);
-  return yearMatch ? parseInt(yearMatch[1], 10) : undefined;
+  const year = yearMatch?.[1];
+  return year ? parseInt(year, 10) : undefined;
 }
 
 /**
@@ -211,9 +212,11 @@ export function parseTVFilename(filename: string): ParsedEpisode {
   // Try each pattern to find season/episode
   for (const pattern of TV_PATTERNS) {
     const match = normalized.match(pattern);
-    if (match && match.index !== undefined) {
-      seasonNumber = parseInt(match[1], 10);
-      episodeNumber = parseInt(match[2], 10);
+    const season = match?.[1];
+    const episode = match?.[2];
+    if (match && match.index !== undefined && season && episode) {
+      seasonNumber = parseInt(season, 10);
+      episodeNumber = parseInt(episode, 10);
       matchIndex = match.index;
       break;
     }

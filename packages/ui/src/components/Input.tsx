@@ -7,7 +7,6 @@ import {
   TextInput,
   View,
   Text,
-  Pressable,
   type TextInputProps,
 } from 'react-native';
 import { cn } from '../utils/cn.js';

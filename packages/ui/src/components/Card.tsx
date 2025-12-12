@@ -108,7 +108,7 @@ export function PressableCard({
       )}
       {...props}
     >
-      {({ pressed, focused }) => (
+      {({ pressed, focused }: { pressed: boolean; focused?: boolean }) => (
         <View
           className={cn(
             pressed && 'opacity-80',

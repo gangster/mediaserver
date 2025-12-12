@@ -5,7 +5,7 @@
  * and emits progress events.
  */
 
-import { readdir, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
 import { parseMovieFilename, parseTVFilename, isTVEpisode } from './parsers.js';
 import { MediaProbe } from './probe.js';

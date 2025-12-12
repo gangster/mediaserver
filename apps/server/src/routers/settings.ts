@@ -286,8 +286,7 @@ export const settingsRouter = router({
    * Get server statistics (for admin dashboard).
    */
   stats: adminProcedure.query(async ({ ctx }) => {
-    const { movies, tvShows, episodes, users } = await import('@mediaserver/db');
-    const { count } = await import('drizzle-orm');
+    const { movies, tvShows, episodes, users, count } = await import('@mediaserver/db');
 
     const [movieCount] = await ctx.db.select({ count: count() }).from(movies);
     const [showCount] = await ctx.db.select({ count: count() }).from(tvShows);

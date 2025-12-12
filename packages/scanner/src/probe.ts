@@ -166,7 +166,7 @@ export class MediaProbe {
     }
 
     // Check direct playability
-    const container = output.format.format_name.split(',')[0];
+    const container = output.format.format_name.split(',')[0] ?? '';
     const canDirectPlayContainer = DIRECT_PLAY_CONTAINERS.some(
       (c) => container.includes(c)
     );
@@ -250,9 +250,11 @@ export class MediaProbe {
     if (!frameRate) return undefined;
 
     const parts = frameRate.split('/');
-    if (parts.length === 2) {
-      const num = parseFloat(parts[0]);
-      const den = parseFloat(parts[1]);
+    const numerator = parts[0];
+    const denominator = parts[1];
+    if (parts.length === 2 && numerator && denominator) {
+      const num = parseFloat(numerator);
+      const den = parseFloat(denominator);
       if (den > 0) return num / den;
     }
 
