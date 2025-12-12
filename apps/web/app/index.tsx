@@ -6,7 +6,7 @@
  */
 
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView } from 'react-native';
 import { Link, useRouter, Redirect } from 'expo-router';
 import {
   useLibraries,
@@ -24,6 +24,7 @@ import { Layout } from '../src/components/layout';
 import { StatCard } from '../src/components/home';
 import { HomeSettingsPanel, HomeSettingsButton } from '../src/components/home';
 import { WebMediaRow, WebHeroBanner, type BannerItem } from '../src/components/media';
+import { Button, ButtonText, Spinner } from '../src/components/ui';
 import type { MediaRowItem } from '@mediaserver/ui';
 
 /**
@@ -252,7 +253,7 @@ export default function WebHomeScreen() {
   if (!hasCheckedTokens || setupLoading) {
     return (
       <View className="flex-1 bg-zinc-950 items-center justify-center">
-        <ActivityIndicator size="large" color="#6366f1" />
+        <Spinner size="large" className="text-indigo-500" />
       </View>
     );
   }
@@ -271,7 +272,7 @@ export default function WebHomeScreen() {
   if (!isInitialized) {
     return (
       <View className="flex-1 bg-zinc-950 items-center justify-center">
-        <ActivityIndicator size="large" color="#6366f1" />
+        <Spinner size="large" className="text-indigo-500" />
         <Text className="text-zinc-500 mt-4">Validating session...</Text>
       </View>
     );
@@ -497,22 +498,9 @@ export default function WebHomeScreen() {
                 </Text>
                 {isAdmin && (
                   <Link href="/libraries" asChild>
-                    <Pressable className="flex flex-row items-center gap-2 px-4 py-2 bg-emerald-600 active:bg-emerald-700 rounded-lg">
-                      <svg
-                        className="w-5 h-5 text-white"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                        />
-                      </svg>
-                      <Text className="text-white">Add Library</Text>
-                    </Pressable>
+                    <Button action="positive" size="md">
+                      <ButtonText>Add Library</ButtonText>
+                    </Button>
                   </Link>
                 )}
               </View>
@@ -527,46 +515,14 @@ export default function WebHomeScreen() {
               </Text>
               <View className="flex flex-row flex-wrap gap-3">
                 <Link href="/libraries" asChild>
-                  <Pressable className="flex flex-row items-center gap-2 px-4 py-2 bg-zinc-800 active:bg-zinc-700 rounded-lg">
-                    <svg
-                      className="w-5 h-5 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                      />
-                    </svg>
-                    <Text className="text-white">Manage Libraries</Text>
-                  </Pressable>
+                  <Button action="secondary" variant="outline" size="md">
+                    <ButtonText>Manage Libraries</ButtonText>
+                  </Button>
                 </Link>
                 <Link href="/settings" asChild>
-                  <Pressable className="flex flex-row items-center gap-2 px-4 py-2 bg-zinc-800 active:bg-zinc-700 rounded-lg">
-                    <svg
-                      className="w-5 h-5 text-white"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                      />
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                      />
-                    </svg>
-                    <Text className="text-white">Settings</Text>
-                  </Pressable>
+                  <Button action="secondary" variant="outline" size="md">
+                    <ButtonText>Settings</ButtonText>
+                  </Button>
                 </Link>
               </View>
             </View>

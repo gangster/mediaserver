@@ -7,6 +7,7 @@
 
 import { View, Text, Pressable } from 'react-native';
 import { Link } from 'expo-router';
+import { Card } from '../ui';
 
 export interface StatCardProps {
   /** Card title */
@@ -38,25 +39,29 @@ export function StatCard({
   onPress,
 }: StatCardProps) {
   const content = (
-    <View className="bg-zinc-900/50 rounded-xl p-4 sm:p-6 border border-zinc-800">
+    <Card
+      variant="outline"
+      size="lg"
+      className="bg-zinc-900/50 border-zinc-800"
+    >
       <View className="flex flex-row items-center justify-between">
         <View className="flex-1">
           <Text className="text-zinc-400 text-sm">{title}</Text>
           {isLoading ? (
-            <View className="h-8 sm:h-9 w-16 mt-1 bg-zinc-800 rounded animate-pulse" />
+            <View className="h-8 w-16 mt-1 bg-zinc-800 rounded animate-pulse" />
           ) : (
-            <Text className="text-2xl sm:text-3xl font-bold text-white mt-1">
+            <Text className="text-2xl font-bold text-white mt-1">
               {value}
             </Text>
           )}
         </View>
         <View
-          className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl ${color} flex items-center justify-center`}
+          className={`w-10 h-10 rounded-xl ${color} flex items-center justify-center`}
         >
           {icon}
         </View>
       </View>
-    </View>
+    </Card>
   );
 
   if (href) {
@@ -83,15 +88,19 @@ export function StatCard({
  */
 export function StatCardSkeleton() {
   return (
-    <View className="bg-zinc-900/50 rounded-xl p-4 sm:p-6 border border-zinc-800">
+    <Card
+      variant="outline"
+      size="lg"
+      className="bg-zinc-900/50 border-zinc-800"
+    >
       <View className="flex flex-row items-center justify-between">
         <View className="flex-1">
           <View className="h-4 w-20 bg-zinc-800 rounded animate-pulse" />
-          <View className="h-8 sm:h-9 w-16 mt-1 bg-zinc-800 rounded animate-pulse" />
+          <View className="h-8 w-16 mt-1 bg-zinc-800 rounded animate-pulse" />
         </View>
-        <View className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-zinc-800 animate-pulse" />
+        <View className="w-10 h-10 rounded-xl bg-zinc-800 animate-pulse" />
       </View>
-    </View>
+    </Card>
   );
 }
 
