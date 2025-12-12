@@ -242,7 +242,6 @@ export function WebHeroBanner({
           {/* Overview - hidden on mobile */}
           {isSmall && item.overview && (
             <Text
-              numberOfLines={3}
               style={{
                 fontSize: overviewFontSize,
                 color: '#e4e4e7',
