@@ -35,36 +35,46 @@ function useResponsivePadding(): number {
   return 16;                     // default: px-4
 }
 
-/** Calculate card width based on screen size */
-function useCardWidth(): number {
+/** Calculate card width based on screen size - matches forreel sizing */
+function useCardWidth(): { cardWidth: number; gap: number } {
   const { width } = useWindowDimensions();
   const padding = useResponsivePadding() * 2; // Both sides
-  const gap = 12; // Gap between cards
   
-  // Determine number of visible cards based on breakpoints
+  // Match forreel's responsive card counts for larger posters:
+  // - xl (1280+): 6 cards
+  // - lg (1024+): 5 cards  
+  // - md (768+): 4 cards
+  // - sm (640+): 3 cards
+  // - xs: 2 cards
   let visibleCards: number;
+  let gap: number;
+  
   if (width >= 1280) {
-    visibleCards = 6; // xl
+    visibleCards = 6;
+    gap = 16;
   } else if (width >= 1024) {
-    visibleCards = 5; // lg
+    visibleCards = 5;
+    gap = 16;
   } else if (width >= 768) {
-    visibleCards = 4; // md
+    visibleCards = 4;
+    gap = 14;
   } else if (width >= 640) {
-    visibleCards = 3; // sm
+    visibleCards = 3;
+    gap = 12;
   } else {
-    visibleCards = 2; // xs
+    visibleCards = 2;
+    gap = 12;
   }
   
-  // Calculate card width
+  // Calculate card width to fill available space (no max cap)
   const availableWidth = width - padding;
   const totalGaps = (visibleCards - 1) * gap;
   const cardWidth = Math.floor((availableWidth - totalGaps) / visibleCards);
   
-  // Cap at reasonable max
-  return Math.min(cardWidth, 185);
+  return { cardWidth, gap };
 }
 
-/** Rating badge */
+/** Rating badge - positioned top-right like forreel */
 function RatingBadge({ rating }: { rating: number }) {
   const color =
     rating >= 7.5
@@ -80,15 +90,15 @@ function RatingBadge({ rating }: { rating: number }) {
       style={{
         position: 'absolute',
         top: 8,
-        left: 8,
+        right: 8,
         backgroundColor: color,
         paddingHorizontal: 6,
-        paddingVertical: 2,
+        paddingVertical: 3,
         borderRadius: 4,
       }}
     >
-      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
-        ★ {rating.toFixed(1)}
+      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+        {rating.toFixed(1)}
       </Text>
     </View>
   );
@@ -185,12 +195,12 @@ function MediaRowCard({
       <View style={{ marginTop: 8 }}>
         <Text
           numberOfLines={1}
-          style={{ color: '#fff', fontSize: 13, fontWeight: '500' }}
+          style={{ color: '#fff', fontSize: 14, fontWeight: '500' }}
         >
           {item.title}
         </Text>
         {item.year && (
-          <Text style={{ color: '#71717a', fontSize: 12, marginTop: 2 }}>
+          <Text style={{ color: '#71717a', fontSize: 13, marginTop: 2 }}>
             {item.year}
           </Text>
         )}
@@ -250,7 +260,7 @@ export function WebMediaRow<T extends MediaRowItem>({
   const scrollRef = useRef<ScrollView>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
-  const cardWidth = useCardWidth();
+  const { cardWidth, gap } = useCardWidth();
   const horizontalPadding = useResponsivePadding();
   const { width: screenWidth } = useWindowDimensions();
   const isDesktop = screenWidth >= 1024;
@@ -314,7 +324,6 @@ export function WebMediaRow<T extends MediaRowItem>({
   }
 
   const items = isLoading ? Array.from({ length: skeletonCount }) : data;
-  const gap = 12;
 
   return (
     <View style={{ marginBottom: 32 }}>

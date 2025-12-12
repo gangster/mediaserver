@@ -59,6 +59,41 @@ The project replicates features from the `forreel` project at `/Users/josh/play/
 - **Yarn 3.8.0** with PnP disabled (uses `node_modules`)
 - Always use `yarn` not `npm`
 
+### UI Components (Gluestack-UI v3)
+
+**Always use gluestack-ui components when building UIs.** Components are located in `apps/web/src/components/ui/`.
+
+```tsx
+// ✅ CORRECT - Use gluestack components
+import { Button, ButtonText, Input, InputField, Spinner, Card } from '../src/components/ui';
+
+<Button action="primary" size="md">
+  <ButtonText>Save Changes</ButtonText>
+</Button>
+
+<Input>
+  <InputField placeholder="Enter text..." value={value} onChangeText={setValue} />
+</Input>
+
+<Spinner size="large" className="text-indigo-500" />
+
+// ❌ WRONG - Don't create custom buttons/inputs
+<Pressable className="px-4 py-2 bg-emerald-600 rounded-lg">
+  <Text>Save Changes</Text>
+</Pressable>
+```
+
+**Available components:**
+- **Buttons**: `Button`, `ButtonText`, `ButtonIcon`, `ButtonSpinner`, `ButtonGroup`
+- **Forms**: `Input`, `InputField`, `InputSlot`, `InputIcon`, `Select`, `Switch`, `Checkbox`
+- **Feedback**: `Spinner`, `Badge`, `Toast`
+- **Layout**: `Card`, `Modal`, `ModalBackdrop`, `ModalContent`, `ModalHeader`, `ModalBody`, `ModalFooter`
+
+**Adding new components:**
+```bash
+nix develop -c bash -c "cd apps/web && npx gluestack-ui add <component-name>"
+```
+
 ### Nix Development Environment
 
 **🚨 CRITICAL: ALL commands must run inside the Nix dev shell.**
