@@ -18,11 +18,11 @@ const ARGON2_OPTIONS = {
   outputLen: 32,
 };
 
-/** Access token expiry in seconds (15 minutes) */
-const ACCESS_TOKEN_EXPIRY_SECONDS = 15 * 60;
+/** Access token expiry in seconds (1 year - effectively never expires) */
+const ACCESS_TOKEN_EXPIRY_SECONDS = 365 * 24 * 60 * 60;
 
-/** Refresh token expiry in seconds (7 days) */
-const REFRESH_TOKEN_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
+/** Refresh token expiry in seconds (10 years - effectively never expires) */
+const REFRESH_TOKEN_EXPIRY_SECONDS = 10 * 365 * 24 * 60 * 60;
 
 // ============================================================================
 // Custom JWT Implementation using Node's native crypto

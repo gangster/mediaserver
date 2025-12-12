@@ -48,12 +48,14 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
       if (payload) {
         userId = payload.sub;
         userRole = payload.role;
-        // Optionally fetch full user from DB here
-        // user = await getUserById(db, userId);
+        console.log('[AUTH] Token verified:', { userId, userRole });
       }
-    } catch {
+    } catch (err) {
       // Invalid token - continue without user
+      console.log('[AUTH] Token verification failed:', err instanceof Error ? err.message : err);
     }
+  } else {
+    console.log('[AUTH] No Bearer token in Authorization header:', authHeader ? 'header present but wrong format' : 'no header');
   }
 
   // Create a plain object copy of env to avoid serialization issues

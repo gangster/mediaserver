@@ -11,6 +11,9 @@ import { z } from 'zod';
 /** UUID schema */
 export const uuidSchema = z.string().uuid();
 
+/** Nanoid schema - flexible ID format (21 characters by default) */
+export const idSchema = z.string().min(1).max(50);
+
 /** Email schema */
 export const emailSchema = z.string().email().toLowerCase().trim();
 

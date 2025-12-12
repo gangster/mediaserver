@@ -1,167 +1,213 @@
 /**
- * Libraries Management Page
- *
- * Admin page for managing media libraries.
+ * Library Management Page
  */
 
-import { View, Text, ScrollView, Pressable, ActivityIndicator } from 'react-native';
-import { Redirect } from 'expo-router';
+import { useState } from 'react';
+import { View, Text, Pressable, ScrollView, useWindowDimensions } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { useLibraries } from '@mediaserver/api-client';
+import { trpc } from '@mediaserver/api-client';
 import { Layout } from '../src/components/layout';
-import { useAuth } from '../src/hooks/useAuth';
-import { useLibraries, useScanLibrary } from '@mediaserver/api-client';
+import { LibraryCard } from '../src/components/libraries/LibraryCard';
+import { LibraryForm } from '../src/components/libraries/LibraryForm';
+import { EmptyState } from '../src/components/libraries/EmptyState';
+
+export interface Library {
+  id: string;
+  name: string;
+  type: 'movie' | 'tv';
+  paths: string[] | string; // May be JSON string from DB or parsed array
+  enabled: boolean;
+  lastScannedAt: string | null;
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export default function LibrariesPage() {
-  const { isAdmin, isInitialized } = useAuth();
-  const { data: libraries, isLoading, refetch } = useLibraries();
-  const scanLibrary = useScanLibrary();
+  const { width } = useWindowDimensions();
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingLibrary, setEditingLibrary] = useState<Library | null>(null);
 
-  // Redirect non-admins
-  if (isInitialized && !isAdmin) {
-    return <Redirect href="/" />;
-  }
+  const { data: libraries, isLoading, error, refetch } = useLibraries();
 
-  const handleScan = async (libraryId: string) => {
-    try {
-      await scanLibrary.mutateAsync({ libraryId });
-      refetch();
-    } catch (error) {
-      console.error('Failed to scan library:', error);
-    }
+  const scanAllMutation = trpc.libraries.scanAll.useMutation({
+    onSuccess: () => refetch(),
+  });
+
+  const handleAddLibrary = () => {
+    setEditingLibrary(null);
+    setIsFormOpen(true);
   };
 
-  return (
-    <Layout>
-      <ScrollView className="flex-1 bg-zinc-950">
-        {/* Header */}
-        <View className="px-4 sm:px-6 lg:px-8 pt-8 pb-6">
-          <View className="flex flex-row items-center justify-between">
-            <View>
-              <Text className="text-2xl sm:text-3xl font-bold text-white">
-                Libraries
-              </Text>
-              <Text className="text-zinc-400 mt-1">
-                Manage your media libraries
-              </Text>
-            </View>
-            <Pressable className="flex flex-row items-center gap-2 px-4 py-2 bg-emerald-600 rounded-lg active:bg-emerald-700">
-              <svg
-                className="w-5 h-5 text-white"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 6v6m0 0v6m0-6h6m-6 0H6"
-                />
-              </svg>
-              <Text className="text-white font-medium">Add Library</Text>
+  const handleEditLibrary = (library: Library) => {
+    setEditingLibrary(library);
+    setIsFormOpen(true);
+  };
+
+  const handleCloseForm = () => {
+    setIsFormOpen(false);
+    setEditingLibrary(null);
+  };
+
+  const handleFormSuccess = () => {
+    handleCloseForm();
+    refetch();
+  };
+
+  // Grid columns
+  const columns = width >= 1024 ? 3 : width >= 768 ? 2 : 1;
+  const gap = 24;
+  const itemWidth = columns === 1 ? '100%' : `calc(${100 / columns}% - ${(gap * (columns - 1)) / columns}px)`;
+
+  // Loading
+  if (isLoading) {
+    return (
+      <Layout>
+        <View style={{ padding: 32 }}>
+          <View style={{ height: 32, backgroundColor: '#27272a', borderRadius: 8, width: 200, marginBottom: 32 }} />
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+            {[1, 2, 3].map((i) => (
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              <View key={i} style={{ height: 200, backgroundColor: '#27272a', borderRadius: 12, width: itemWidth } as any} />
+            ))}
+          </View>
+        </View>
+      </Layout>
+    );
+  }
+
+  // Error
+  if (error) {
+    return (
+      <Layout>
+        <View style={{ padding: 32 }}>
+          <View
+            style={{
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              borderWidth: 1,
+              borderColor: 'rgba(239, 68, 68, 0.3)',
+              borderRadius: 12,
+              padding: 32,
+              alignItems: 'center',
+            }}
+          >
+            <Feather name="alert-circle" size={48} color="#f87171" style={{ marginBottom: 16 }} />
+            <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '600', marginBottom: 8 }}>
+              Failed to load libraries
+            </Text>
+            <Text style={{ color: '#a1a1aa', marginBottom: 16 }}>{error.message}</Text>
+            <Pressable
+              onPress={() => refetch()}
+              style={{ paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#dc2626', borderRadius: 8 }}
+            >
+              <Text style={{ color: '#ffffff', fontWeight: '500' }}>Try again</Text>
             </Pressable>
           </View>
         </View>
+      </Layout>
+    );
+  }
 
-        {/* Content */}
-        <View className="px-4 sm:px-6 lg:px-8 pb-8">
-          {isLoading ? (
-            <View className="items-center py-16">
-              <ActivityIndicator size="large" color="#6366f1" />
-            </View>
-          ) : libraries?.length === 0 ? (
-            <View className="items-center py-16 bg-zinc-900 rounded-xl border border-zinc-800">
-              <View className="w-16 h-16 mb-4 rounded-full bg-zinc-800 flex items-center justify-center">
-                <svg
-                  className="w-8 h-8 text-zinc-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                  />
-                </svg>
-              </View>
-              <Text className="text-zinc-400 text-lg">No libraries yet</Text>
-              <Text className="text-zinc-500 mt-1">
-                Add a library to start scanning your media
+  // Empty
+  if (!libraries || libraries.length === 0) {
+    return (
+      <Layout>
+        <EmptyState onAddLibrary={handleAddLibrary} />
+        <LibraryForm isOpen={isFormOpen} library={editingLibrary} onClose={handleCloseForm} onSuccess={handleFormSuccess} />
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout>
+      <ScrollView style={{ flex: 1 }}>
+        <View style={{ padding: 32 }}>
+          {/* Header */}
+          <View
+            style={{
+              marginBottom: 32,
+              flexDirection: width >= 640 ? 'row' : 'column',
+              alignItems: width >= 640 ? 'center' : 'flex-start',
+              justifyContent: 'space-between',
+              gap: 16,
+            }}
+          >
+            <View>
+              <Text style={{ fontSize: 30, fontWeight: '700', color: '#ffffff' }}>Libraries</Text>
+              <Text style={{ color: '#a1a1aa', marginTop: 4 }}>
+                Manage your media libraries and scan for new content
               </Text>
             </View>
-          ) : (
-            <View className="gap-4">
-              {libraries?.map((library: { id: string; name: string; type: string; path: string }) => (
-                <View
-                  key={library.id}
-                  className="bg-zinc-900 rounded-xl p-6 border border-zinc-800"
-                >
-                  <View className="flex flex-row items-start justify-between">
-                    <View className="flex-1">
-                      <View className="flex flex-row items-center gap-2">
-                        <Text className="text-lg font-semibold text-white">
-                          {library.name}
-                        </Text>
-                        <View
-                          className={`px-2 py-0.5 rounded-full ${
-                            library.type === 'movies'
-                              ? 'bg-indigo-600/20'
-                              : 'bg-purple-600/20'
-                          }`}
-                        >
-                          <Text
-                            className={`text-xs ${
-                              library.type === 'movies'
-                                ? 'text-indigo-400'
-                                : 'text-purple-400'
-                            }`}
-                          >
-                            {library.type === 'movies' ? 'Movies' : 'TV Shows'}
-                          </Text>
-                        </View>
-                      </View>
-                      <Text className="text-zinc-400 text-sm mt-1">
-                        {library.path}
-                      </Text>
-                    </View>
-                    <View className="flex flex-row gap-2">
-                      <Pressable
-                        onPress={() => handleScan(library.id)}
-                        disabled={scanLibrary.isPending}
-                        className="px-3 py-2 bg-zinc-800 rounded-lg active:bg-zinc-700"
-                      >
-                        <Text className="text-white text-sm">Scan</Text>
-                      </Pressable>
-                      <Pressable className="px-3 py-2 bg-zinc-800 rounded-lg active:bg-zinc-700">
-                        <svg
-                          className="w-5 h-5 text-zinc-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                          />
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                          />
-                        </svg>
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              ))}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <Pressable
+                onPress={() => scanAllMutation.mutate()}
+                disabled={scanAllMutation.isPending}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  backgroundColor: '#27272a',
+                  borderRadius: 8,
+                  opacity: scanAllMutation.isPending ? 0.5 : 1,
+                }}
+              >
+                <Feather name="refresh-cw" size={18} color="#ffffff" />
+                <Text style={{ color: '#ffffff', fontWeight: '500' }}>Scan All</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleAddLibrary}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  backgroundColor: '#6366f1',
+                  borderRadius: 8,
+                }}
+              >
+                <Feather name="plus" size={18} color="#ffffff" />
+                <Text style={{ color: '#ffffff', fontWeight: '500' }}>Add Library</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Success message */}
+          {scanAllMutation.isSuccess && (
+            <View
+              style={{
+                marginBottom: 24,
+                padding: 16,
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                borderWidth: 1,
+                borderColor: 'rgba(16, 185, 129, 0.3)',
+                borderRadius: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <Feather name="check" size={18} color="#34d399" />
+              <Text style={{ color: '#6ee7b7' }}>Scan started for {scanAllMutation.data?.count} libraries</Text>
             </View>
           )}
+
+          {/* Grid */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+            {libraries.map((library: Library) => (
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              <View key={library.id} style={{ width: itemWidth } as any}>
+                <LibraryCard library={library} onEdit={() => handleEditLibrary(library)} onRefresh={refetch} />
+              </View>
+            ))}
+          </View>
         </View>
       </ScrollView>
+
+      <LibraryForm isOpen={isFormOpen} library={editingLibrary} onClose={handleCloseForm} onSuccess={handleFormSuccess} />
     </Layout>
   );
 }

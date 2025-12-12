@@ -8,7 +8,7 @@ Mediaserver is a self-hosted media server application (similar to Plex/Jellyfin)
 - **Web app** (`apps/web`): Expo/React Native Web frontend
 - **Mobile app** (`apps/mobile`): Expo React Native mobile app  
 - **TV app** (`apps/tv`): Expo React Native TV app
-- **Server** (`apps/server`): Bun/Hono/tRPC backend
+- **Server** (`apps/server`): Node.js/Hono/tRPC backend
 - **Shared packages** (`packages/*`): Reusable code across apps
 
 The project replicates features from the `forreel` project at `/Users/josh/play/forreel`. When implementing features, reference forreel's implementation but adapt for React Native Web/NativeWind.
@@ -23,7 +23,7 @@ The project replicates features from the `forreel` project at `/Users/josh/play/
 - **API**: tRPC with `@mediaserver/api-client` hooks
 
 ### Backend (apps/server)
-- **Runtime**: Bun
+- **Runtime**: Node.js (with tsx for development)
 - **Framework**: Hono
 - **API**: tRPC
 - **Database**: SQLite with Drizzle ORM
@@ -49,7 +49,7 @@ yarn nx run web:start
 ```
 
 The flake provides:
-- Node.js 20, Bun, and Yarn (via corepack)
+- Node.js 22 and Yarn (via corepack)
 - SQLite and ffmpeg
 - Required environment variables (`DATABASE_URL`, `JWT_SECRET`, etc.)
 

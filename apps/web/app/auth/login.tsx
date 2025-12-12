@@ -5,15 +5,17 @@
  */
 
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { Link, useRouter, Redirect } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { loginFormSchema, type LoginFormInput } from '@mediaserver/config';
+import { useSetupStatus } from '@mediaserver/api-client';
 import { useAuth } from '../../src/hooks/useAuth';
 
 export default function Login() {
   const { login, isLoading, error, clearError } = useAuth();
+  const { data: setupStatus, isLoading: setupLoading } = useSetupStatus();
   const router = useRouter();
   const [focusedField, setFocusedField] = useState<string | null>(null);
 
@@ -28,6 +30,20 @@ export default function Login() {
       password: '',
     },
   });
+
+  // Show loading while checking setup status
+  if (setupLoading) {
+    return (
+      <View className="flex-1 bg-zinc-950 items-center justify-center">
+        <ActivityIndicator size="large" color="#6366f1" />
+      </View>
+    );
+  }
+
+  // Redirect to setup if not complete
+  if (setupStatus && !setupStatus.isComplete) {
+    return <Redirect href="/setup" />;
+  }
 
   const onSubmit = async (data: LoginFormInput) => {
     clearError();

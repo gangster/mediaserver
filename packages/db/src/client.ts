@@ -2,6 +2,8 @@
  * Database client setup and connection management.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { createClient, type Client } from '@libsql/client';
 import { drizzle, type LibSQLDatabase } from 'drizzle-orm/libsql';
 import * as schema from './schema/index.js';
@@ -21,10 +23,28 @@ export interface DatabaseOptions {
 }
 
 /**
+ * Ensures the database directory exists for file-based databases.
+ * @param url - Database URL
+ */
+function ensureDatabaseDirectory(url: string): void {
+  if (url.startsWith('file:')) {
+    const filePath = url.slice(5); // Remove 'file:' prefix
+    const dir = path.dirname(filePath);
+    if (dir && dir !== '.' && !fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`📁 Created database directory: ${dir}`);
+    }
+  }
+}
+
+/**
  * Creates a database client.
  * @param options - Connection options
  */
 export function createDatabase(options: DatabaseOptions): Database {
+  // Ensure directory exists for file-based databases
+  ensureDatabaseDirectory(options.url);
+
   const client = createClient({
     url: options.url,
     authToken: options.authToken,
@@ -62,4 +82,3 @@ export function createTestDatabase(): Database {
 
 /** LibSQL client type (for direct access) */
 export type { Client };
-

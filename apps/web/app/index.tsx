@@ -15,6 +15,7 @@ import {
   useRecentMovies,
   useRecentShows,
   useContinueWatching,
+  useSetupStatus,
 } from '@mediaserver/api-client';
 
 import { useAuth } from '../src/hooks/useAuth';
@@ -127,6 +128,7 @@ function showToBanner(show: {
 export default function WebHomeScreen() {
   const router = useRouter();
   const { isAuthenticated, isInitialized, user, isAdmin } = useAuth();
+  const { data: setupStatus, isLoading: setupLoading } = useSetupStatus();
   const { homePreferences } = usePreferencesStore();
   const [settingsPanelOpen, setSettingsPanelOpen] = useState(false);
   const [hasCheckedTokens, setHasCheckedTokens] = useState(false);
@@ -236,8 +238,8 @@ export default function WebHomeScreen() {
     [router]
   );
 
-  // Wait for client-side token check
-  if (!hasCheckedTokens) {
+  // Wait for client-side token check and setup status
+  if (!hasCheckedTokens || setupLoading) {
     return (
       <View className="flex-1 bg-zinc-950 items-center justify-center">
         <ActivityIndicator size="large" color="#6366f1" />
@@ -245,7 +247,12 @@ export default function WebHomeScreen() {
     );
   }
 
-  // Redirect to login if no tokens
+  // If setup is not complete, redirect to setup wizard
+  if (setupStatus && !setupStatus.isComplete) {
+    return <Redirect href="/setup" />;
+  }
+
+  // Redirect to login if no tokens (and setup is complete)
   if (!hasTokens) {
     return <Redirect href="/auth/login" />;
   }

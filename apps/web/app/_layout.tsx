@@ -9,6 +9,7 @@ import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ApiProvider, useSetupStatus } from '@mediaserver/api-client';
 import { useAuth } from '../src/hooks/useAuth';
+import { getAccessToken } from '../src/stores/auth';
 
 import '../global.css';
 
@@ -56,7 +57,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   return (
-    <ApiProvider config={{ baseUrl: 'http://localhost:3000' }}>
+    <ApiProvider config={{ baseUrl: 'http://localhost:3000', getToken: getAccessToken }}>
       <StatusBar style="light" />
       <AuthGuard>
         <Stack

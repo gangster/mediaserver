@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo/vector-icons": "^15.0.3",
     "@hookform/resolvers": "^5.2.2",
     "@mediaserver/api-client": "workspace:*",
     "@mediaserver/config": "workspace:^",

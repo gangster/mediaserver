@@ -52,6 +52,9 @@ async function authRequest<T>(
   body?: unknown,
   token?: string
 ): Promise<T> {
+  // #region agent log
+  console.log('[DEBUG H1] authRequest called', { procedure, method, hasBody: !!body });
+  // #endregion
   const headers: Record<string, string> = {};
 
   if (method === 'POST') {
@@ -66,6 +69,10 @@ async function authRequest<T>(
     ? `${API_URL}/auth.${procedure}?input=${encodeURIComponent(JSON.stringify({ json: body }))}`
     : `${API_URL}/auth.${procedure}`;
 
+  // #region agent log
+  console.log('[DEBUG H1] Fetching', { url });
+  // #endregion
+
   const res = await fetch(url, {
     method,
     headers,
@@ -73,6 +80,9 @@ async function authRequest<T>(
   });
 
   const data = await res.json();
+  // #region agent log
+  console.log('[DEBUG H1] Response', { ok: res.ok, status: res.status, hasError: !!data.error, dataKeys: Object.keys(data) });
+  // #endregion
 
   if (!res.ok || data.error) {
     // tRPC with superjson can wrap errors in different structures
@@ -86,6 +96,9 @@ async function authRequest<T>(
       data.error?.data?.code || 
       data.error?.code || 
       'UNKNOWN_ERROR';
+    // #region agent log
+    console.log('[DEBUG H1] Auth error', { errorMessage, errorCode, status: res.status });
+    // #endregion
     throw new AuthApiError(errorMessage, errorCode, res.status);
   }
 
@@ -134,19 +147,29 @@ export const authApi = {
   /**
    * Get current user
    */
-  me: (accessToken: string) =>
-    fetch(`${API_URL}/user.me`, {
+  me: (accessToken: string) => {
+    // tRPC GET requests need input parameter - for no input, use empty object encoded
+    const input = encodeURIComponent(JSON.stringify({ '0': { json: null, meta: { values: ['undefined'], v: 1 } } }));
+    return fetch(`${API_URL}/user.me?batch=1&input=${input}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) {
+          throw new AuthApiError('Failed to get user', 'UNAUTHORIZED', res.status);
+        }
+        return res.json();
+      })
       .then(data => {
-        if (data.error) {
+        // Handle batched response format
+        const result = Array.isArray(data) ? data[0] : data;
+        if (result?.error) {
           throw new AuthApiError(
-            data.error.message || 'Failed to get user',
-            data.error.code || 'UNKNOWN_ERROR',
+            result.error.message || 'Failed to get user',
+            result.error.code || 'UNKNOWN_ERROR',
             401
           );
         }
-        return data.result?.data?.json as User;
-      }),
+        return result?.result?.data?.json as User;
+      });
+  },
 };

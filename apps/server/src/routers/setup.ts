@@ -14,11 +14,18 @@ import {
   settings,
   metadataProviders,
   privacySettings,
+  refreshTokens,
   eq,
   count,
 } from '@mediaserver/db';
-import { hashPassword } from '../lib/auth.js';
+import {
+  hashPassword,
+  createAccessToken,
+  createRefreshToken,
+  createTokenFamily,
+} from '../lib/auth.js';
 import { generateId } from '@mediaserver/core';
+import type { UserRole } from '@mediaserver/core';
 
 /** Settings keys */
 const SETUP_COMPLETE_KEY = 'setup_complete';
@@ -187,6 +194,7 @@ export const setupRouter = router({
   /**
    * Create the owner account.
    * Only works if no users exist in the database.
+   * Returns auth tokens so user is automatically logged in.
    */
   createOwner: publicProcedure
     .input(
@@ -213,22 +221,61 @@ export const setupRouter = router({
       // Create owner user
       const userId = generateId();
       const now = new Date().toISOString();
+      const role: UserRole = 'owner';
 
       await ctx.db.insert(users).values({
         id: userId,
         email: input.email.toLowerCase(),
         passwordHash,
         displayName: input.displayName,
-        role: 'owner',
+        role,
         isActive: true,
         createdAt: now,
         updatedAt: now,
+      });
+
+      // Generate auth tokens so user is automatically logged in
+      const jwtSecret = process.env['JWT_SECRET'] ?? '';
+      const jwtRefreshSecret = process.env['JWT_REFRESH_SECRET'] ?? '';
+
+      const { token: accessToken, expiresAt: accessTokenExpiresAt } = createAccessToken(
+        userId,
+        role,
+        jwtSecret
+      );
+
+      const familyId = createTokenFamily();
+      const {
+        token: refreshToken,
+        expiresAt: refreshTokenExpiresAt,
+        tokenHash,
+      } = createRefreshToken(userId, familyId, jwtRefreshSecret);
+
+      // Store refresh token
+      await ctx.db.insert(refreshTokens).values({
+        id: generateId(),
+        userId,
+        tokenHash,
+        familyId,
+        expiresAt: refreshTokenExpiresAt.toISOString(),
+        createdAt: now,
       });
 
       return {
         success: true,
         userId,
         message: 'Owner account created successfully.',
+        tokens: {
+          accessToken,
+          refreshToken,
+          expiresAt: accessTokenExpiresAt.toISOString(),
+        },
+        user: {
+          id: userId,
+          email: input.email.toLowerCase(),
+          displayName: input.displayName,
+          role,
+        },
       };
     }),
 

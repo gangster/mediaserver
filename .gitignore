@@ -98,3 +98,6 @@ secrets/
 tmp/
 temp/
 
+
+# Direnv
+.direnv/

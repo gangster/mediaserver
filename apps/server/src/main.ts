@@ -2,9 +2,10 @@
  * Server entry point.
  *
  * This is the main entry point for the mediaserver backend.
- * Uses Bun as the runtime, Hono as the web framework, and tRPC for the API.
+ * Uses Node.js as the runtime, Hono as the web framework, and tRPC for the API.
  */
 
+import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -90,12 +91,11 @@ log.info(`📡 tRPC API available at http://${host}:${port}/api`);
 log.info(`🎬 Streaming API available at http://${host}:${port}/api/stream`);
 log.info(`💚 Health check at http://${host}:${port}/health`);
 
-export default {
+serve({
+  fetch: app.fetch,
   port,
   hostname: host,
-  fetch: app.fetch,
-};
+});
 
 // Export types for client
 export type { AppRouter } from './routers/app.js';
-

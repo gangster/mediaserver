@@ -21,6 +21,7 @@ export type { Config, TranscodeProfile } from './config.js';
 export {
   // Common
   uuidSchema,
+  idSchema,
   emailSchema,
   passwordSchema,
   displayNameSchema,

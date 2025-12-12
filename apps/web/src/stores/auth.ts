@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { authApi, type User, type AuthTokens } from '../lib/auth-api';
+import { authApi, AuthApiError, type User, type AuthTokens } from '../lib/auth-api';
 
 /** Auth state */
 interface AuthState {
@@ -23,6 +23,8 @@ interface AuthActions {
   refreshToken: () => Promise<boolean>;
   clearError: () => void;
   initialize: () => Promise<void>;
+  /** Set auth state directly (used by setup wizard) */
+  setAuth: (user: User, tokens: AuthTokens) => void;
 }
 
 /** Combined auth store */
@@ -52,9 +54,15 @@ export const useAuthStore = create<AuthStore>()(
 
       // Actions
       login: async (email, password) => {
+        // #region agent log
+        console.log('[DEBUG H1] auth.ts login called', { email });
+        // #endregion
         set({ isLoading: true, error: null });
         try {
           const response = await authApi.login({ email, password });
+          // #region agent log
+          console.log('[DEBUG H1,H2] authApi.login response', { hasUser: !!response.user, hasAccessToken: !!response.accessToken });
+          // #endregion
           set({
             user: response.user,
             tokens: {
@@ -64,7 +72,14 @@ export const useAuthStore = create<AuthStore>()(
             },
             isLoading: false,
           });
+          // #region agent log
+          const lsNow = typeof window !== 'undefined' ? localStorage.getItem('mediaserver-auth') : null;
+          console.log('[DEBUG H2] After set() in login, localStorage:', lsNow);
+          // #endregion
         } catch (err) {
+          // #region agent log
+          console.log('[DEBUG H1] login error', { error: err instanceof Error ? err.message : String(err) });
+          // #endregion
           const message = err instanceof Error ? err.message : 'Login failed';
           set({ isLoading: false, error: message });
           throw err;
@@ -133,17 +148,51 @@ export const useAuthStore = create<AuthStore>()(
 
       clearError: () => set({ error: null }),
 
+      setAuth: (user, tokens) => {
+        set({
+          user,
+          tokens,
+          isInitialized: true,
+          isLoading: false,
+          error: null,
+        });
+      },
+
       initialize: async () => {
-        const { tokens, refreshToken } = get();
+        const state = get();
+        
+        // #region agent log
+        fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'Initialize called',data:{isInitialized:state.isInitialized,hasTokens:!!state.tokens,hasUser:!!state.user},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+        // #endregion
+        
+        // Already initialized - don't re-run
+        if (state.isInitialized) {
+          return;
+        }
+
+        const { tokens, user } = state;
 
         if (!tokens) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'No tokens, marking initialized',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+          // #endregion
+          set({ isInitialized: true });
+          return;
+        }
+
+        // If we already have user data (e.g., from setAuth), just mark as initialized
+        // Don't need to verify - tokens were just set
+        if (user) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'User exists, skipping API verify',data:{userId:user.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+          // #endregion
           set({ isInitialized: true });
           return;
         }
 
         // Check if token needs refresh
         if (isTokenExpired(tokens.expiresAt)) {
-          const success = await refreshToken();
+          const success = await state.refreshToken();
           if (!success) {
             set({ isInitialized: true });
             return;
@@ -154,17 +203,24 @@ export const useAuthStore = create<AuthStore>()(
         try {
           const currentTokens = get().tokens;
           if (currentTokens) {
-            const user = await authApi.me(currentTokens.accessToken);
-            set({ user, isInitialized: true });
+            const fetchedUser = await authApi.me(currentTokens.accessToken);
+            set({ user: fetchedUser, isInitialized: true });
           } else {
             set({ isInitialized: true });
           }
         } catch (err) {
-          // Only clear state on authentication errors (401)
-          if (err instanceof Error && 'status' in err && (err as { status: number }).status === 401) {
+          // #region agent log
+          fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'API error in initialize',data:{error:err instanceof Error ? err.message : String(err),status:(err as any)?.status},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+          // #endregion
+          // Only clear state on explicit authentication errors (401)
+          if (err instanceof AuthApiError && err.status === 401) {
+            // #region agent log
+            fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'401 error - CLEARING TOKENS',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
+            // #endregion
             set({ user: null, tokens: null, isInitialized: true });
           } else {
-            // Keep existing user data, just mark as initialized
+            // Keep existing tokens on network errors, just mark as initialized
+            // User can still try to use the app - requests will fail if tokens invalid
             set({ isInitialized: true });
           }
         }
@@ -192,9 +248,47 @@ export const useAuthStore = create<AuthStore>()(
   )
 );
 
+/** Promise that resolves when hydration is complete */
+let hydrationPromise: Promise<void> | null = null;
+
+/**
+ * Ensure the auth store is hydrated from localStorage.
+ * Returns a promise that resolves when hydration is complete.
+ */
+function ensureHydrated(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return Promise.resolve();
+  }
+  
+  if (!hydrationPromise) {
+    hydrationPromise = new Promise<void>((resolve) => {
+      // Check if already hydrated
+      const unsubFinishHydration = useAuthStore.persist.onFinishHydration(() => {
+        unsubFinishHydration();
+        resolve();
+      });
+      
+      // Trigger hydration
+      useAuthStore.persist.rehydrate();
+      
+      // If hydration is already complete (sync), the callback may not fire
+      // So also resolve after a microtask
+      Promise.resolve().then(() => {
+        if (useAuthStore.persist.hasHydrated()) {
+          resolve();
+        }
+      });
+    });
+  }
+  
+  return hydrationPromise;
+}
+
 /**
  * Get the current access token (for tRPC)
+ * Ensures store is hydrated before reading.
  */
-export function getAccessToken(): string | null {
+export async function getAccessToken(): Promise<string | null> {
+  await ensureHydrated();
   return useAuthStore.getState().tokens?.accessToken ?? null;
 }

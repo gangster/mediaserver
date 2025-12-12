@@ -17,7 +17,7 @@ import {
   createLibraryInputSchema,
   updateLibraryInputSchema,
   grantLibraryPermissionInputSchema,
-  uuidSchema,
+  idSchema,
 } from '@mediaserver/config';
 import { generateId } from '@mediaserver/core';
 import {
@@ -142,40 +142,59 @@ export const librariesRouter = router({
    * List all libraries the user has access to.
    */
   list: protectedProcedure.query(async ({ ctx }) => {
+    let libraryList;
+
     // Owner and admin can see all libraries
     if (ctx.userRole === 'owner' || ctx.userRole === 'admin') {
-      return ctx.db.query.libraries.findMany({
+      libraryList = await ctx.db.query.libraries.findMany({
+        orderBy: (libraries, { asc }) => [asc(libraries.name)],
+      });
+    } else {
+      // Other users see only libraries they have permission for
+      const permissions = await ctx.db.query.libraryPermissions.findMany({
+        where: and(
+          eq(libraryPermissions.userId, ctx.userId),
+          eq(libraryPermissions.canView, true)
+        ),
+      });
+
+      const libraryIds = permissions.map((p) => p.libraryId);
+      if (libraryIds.length === 0) {
+        return [];
+      }
+
+      libraryList = await ctx.db.query.libraries.findMany({
+        where: sql`${libraries.id} IN (${sql.join(
+          libraryIds.map((id) => sql`${id}`),
+          sql`, `
+        )})`,
         orderBy: (libraries, { asc }) => [asc(libraries.name)],
       });
     }
 
-    // Other users see only libraries they have permission for
-    const permissions = await ctx.db.query.libraryPermissions.findMany({
-      where: and(
-        eq(libraryPermissions.userId, ctx.userId),
-        eq(libraryPermissions.canView, true)
-      ),
-    });
+    // Add item counts for each library
+    const librariesWithCounts = await Promise.all(
+      libraryList.map(async (library) => {
+        let itemCount = 0;
+        if (library.type === 'movie') {
+          const result = await ctx.db.select({ count: count() }).from(movies).where(eq(movies.libraryId, library.id));
+          itemCount = result[0]?.count ?? 0;
+        } else {
+          const result = await ctx.db.select({ count: count() }).from(tvShows).where(eq(tvShows.libraryId, library.id));
+          itemCount = result[0]?.count ?? 0;
+        }
+        return { ...library, itemCount };
+      })
+    );
 
-    const libraryIds = permissions.map((p) => p.libraryId);
-    if (libraryIds.length === 0) {
-      return [];
-    }
-
-    return ctx.db.query.libraries.findMany({
-      where: sql`${libraries.id} IN (${sql.join(
-        libraryIds.map((id) => sql`${id}`),
-        sql`, `
-      )})`,
-      orderBy: (libraries, { asc }) => [asc(libraries.name)],
-    });
+    return librariesWithCounts;
   }),
 
   /**
    * Get a single library by ID.
    */
   get: protectedProcedure
-    .input(z.object({ id: uuidSchema }))
+    .input(z.object({ id: idSchema }))
     .query(async ({ ctx, input }) => {
       const library = await ctx.db.query.libraries.findFirst({
         where: eq(libraries.id, input.id),
@@ -213,7 +232,7 @@ export const librariesRouter = router({
    * Get library statistics.
    */
   stats: protectedProcedure
-    .input(z.object({ id: uuidSchema }))
+    .input(z.object({ id: idSchema }))
     .query(async ({ ctx, input }) => {
       const library = await ctx.db.query.libraries.findFirst({
         where: eq(libraries.id, input.id),
@@ -278,7 +297,7 @@ export const librariesRouter = router({
   update: adminProcedure
     .input(
       z.object({
-        id: uuidSchema,
+        id: idSchema,
         data: updateLibraryInputSchema,
       })
     )
@@ -322,7 +341,7 @@ export const librariesRouter = router({
    * Delete a library.
    */
   delete: capabilityProcedure('canDeleteLibraries')
-    .input(z.object({ id: uuidSchema }))
+    .input(z.object({ id: idSchema }))
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.query.libraries.findFirst({
         where: eq(libraries.id, input.id),
@@ -345,7 +364,7 @@ export const librariesRouter = router({
    * Start a library scan.
    */
   scan: capabilityProcedure('canScanLibraries')
-    .input(z.object({ id: uuidSchema }))
+    .input(z.object({ id: idSchema }))
     .mutation(async ({ ctx, input }) => {
       const library = await ctx.db.query.libraries.findFirst({
         where: eq(libraries.id, input.id),
@@ -383,17 +402,74 @@ export const librariesRouter = router({
         createdBy: ctx.userId,
       });
 
-      // TODO: Trigger actual scan worker
-      // For now, we just return the job ID
+      // Run the scan asynchronously (don't await)
+      const db = ctx.db;
+      import('../services/scan.js').then(({ runLibraryScan }) => {
+        runLibraryScan(db, jobId, input.id).catch((err) => {
+          console.error('Scan failed:', err);
+        });
+      });
 
       return { jobId, alreadyRunning: false };
+    }),
+
+  /**
+   * Start scanning all libraries.
+   */
+  scanAll: capabilityProcedure('canScanLibraries')
+    .mutation(async ({ ctx }) => {
+      // Get all libraries
+      const allLibraries = await ctx.db.query.libraries.findMany({
+        where: eq(libraries.enabled, true),
+      });
+
+      let count = 0;
+
+      for (const library of allLibraries) {
+        // Check if a scan is already running
+        const existingJob = await ctx.db.query.backgroundJobs.findFirst({
+          where: and(
+            eq(backgroundJobs.type, 'scan'),
+            eq(backgroundJobs.targetType, 'library'),
+            eq(backgroundJobs.targetId, library.id),
+            eq(backgroundJobs.status, 'running')
+          ),
+        });
+
+        if (existingJob) {
+          continue; // Skip this library
+        }
+
+        // Create a new scan job
+        const jobId = generateId();
+        await ctx.db.insert(backgroundJobs).values({
+          id: jobId,
+          type: 'scan',
+          targetType: 'library',
+          targetId: library.id,
+          status: 'pending',
+          createdBy: ctx.userId,
+        });
+
+        // Run the scan asynchronously (don't await)
+        const db = ctx.db;
+        import('../services/scan.js').then(({ runLibraryScan }) => {
+          runLibraryScan(db, jobId, library.id).catch((err) => {
+            console.error('Scan failed:', err);
+          });
+        });
+
+        count++;
+      }
+
+      return { count };
     }),
 
   /**
    * Get scan status for a library.
    */
   scanStatus: protectedProcedure
-    .input(z.object({ id: uuidSchema }))
+    .input(z.object({ id: idSchema }))
     .query(async ({ ctx, input }) => {
       const job = await ctx.db.query.backgroundJobs.findFirst({
         where: and(
@@ -483,8 +559,8 @@ export const librariesRouter = router({
   revokePermission: adminProcedure
     .input(
       z.object({
-        userId: uuidSchema,
-        libraryId: uuidSchema,
+        userId: idSchema,
+        libraryId: idSchema,
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -504,7 +580,7 @@ export const librariesRouter = router({
    * List permissions for a library.
    */
   listPermissions: adminProcedure
-    .input(z.object({ libraryId: uuidSchema }))
+    .input(z.object({ libraryId: idSchema }))
     .query(async ({ ctx, input }) => {
       return ctx.db.query.libraryPermissions.findMany({
         where: eq(libraryPermissions.libraryId, input.libraryId),
