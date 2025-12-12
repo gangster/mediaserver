@@ -41,6 +41,8 @@ export interface ApiClientConfig {
   debug?: boolean;
   /** Custom headers */
   headers?: Record<string, string>;
+  /** Callback when authentication fails (401 error) */
+  onAuthError?: () => void;
 }
 
 /**
@@ -49,7 +51,7 @@ export interface ApiClientConfig {
  * @param config - Client configuration
  */
 export function createApiClient(config: ApiClientConfig) {
-  const { baseUrl, getToken, debug = false, headers = {} } = config;
+  const { baseUrl, getToken, debug = false, headers = {}, onAuthError } = config;
 
   return trpc.createClient({
     links: [
@@ -68,6 +70,17 @@ export function createApiClient(config: ApiClientConfig) {
             ...headers,
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           };
+        },
+        fetch: async (url, options) => {
+          const response = await fetch(url, options);
+          
+          // Handle 401 Unauthorized - token is invalid
+          if (response.status === 401 && onAuthError) {
+            console.log('[API Client] Received 401 - triggering auth error handler');
+            onAuthError();
+          }
+          
+          return response;
         },
       }),
     ],

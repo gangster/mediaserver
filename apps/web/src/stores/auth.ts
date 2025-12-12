@@ -54,15 +54,9 @@ export const useAuthStore = create<AuthStore>()(
 
       // Actions
       login: async (email, password) => {
-        // #region agent log
-        console.log('[DEBUG H1] auth.ts login called', { email });
-        // #endregion
         set({ isLoading: true, error: null });
         try {
           const response = await authApi.login({ email, password });
-          // #region agent log
-          console.log('[DEBUG H1,H2] authApi.login response', { hasUser: !!response.user, hasAccessToken: !!response.accessToken });
-          // #endregion
           set({
             user: response.user,
             tokens: {
@@ -72,14 +66,7 @@ export const useAuthStore = create<AuthStore>()(
             },
             isLoading: false,
           });
-          // #region agent log
-          const lsNow = typeof window !== 'undefined' ? localStorage.getItem('mediaserver-auth') : null;
-          console.log('[DEBUG H2] After set() in login, localStorage:', lsNow);
-          // #endregion
         } catch (err) {
-          // #region agent log
-          console.log('[DEBUG H1] login error', { error: err instanceof Error ? err.message : String(err) });
-          // #endregion
           const message = err instanceof Error ? err.message : 'Login failed';
           set({ isLoading: false, error: message });
           throw err;
@@ -161,66 +148,52 @@ export const useAuthStore = create<AuthStore>()(
       initialize: async () => {
         const state = get();
         
-        // #region agent log
-        fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'Initialize called',data:{isInitialized:state.isInitialized,hasTokens:!!state.tokens,hasUser:!!state.user},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
-        
         // Already initialized - don't re-run
         if (state.isInitialized) {
           return;
         }
 
-        const { tokens, user } = state;
+        const { tokens } = state;
 
         if (!tokens) {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'No tokens, marking initialized',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-          // #endregion
-          set({ isInitialized: true });
-          return;
-        }
-
-        // If we already have user data (e.g., from setAuth), just mark as initialized
-        // Don't need to verify - tokens were just set
-        if (user) {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'User exists, skipping API verify',data:{userId:user.id},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-          // #endregion
+          console.log('[Auth] No tokens found, marking initialized');
           set({ isInitialized: true });
           return;
         }
 
         // Check if token needs refresh
         if (isTokenExpired(tokens.expiresAt)) {
+          console.log('[Auth] Token expired, attempting refresh...');
           const success = await state.refreshToken();
           if (!success) {
-            set({ isInitialized: true });
+            console.log('[Auth] Token refresh failed during init');
+            set({ user: null, tokens: null, isInitialized: true });
             return;
           }
         }
 
-        // Verify token is still valid by fetching user
+        // Always verify token is still valid by fetching user
+        // This catches cases where server restarted with new JWT secret
         try {
           const currentTokens = get().tokens;
           if (currentTokens) {
+            console.log('[Auth] Verifying token by fetching user...');
             const fetchedUser = await authApi.me(currentTokens.accessToken);
             set({ user: fetchedUser, isInitialized: true });
+            console.log('[Auth] Token verified, user loaded');
           } else {
             set({ isInitialized: true });
           }
         } catch (err) {
-          // #region agent log
-          fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'API error in initialize',data:{error:err instanceof Error ? err.message : String(err),status:(err as any)?.status},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-          // #endregion
+          console.log('[Auth] Token verification failed:', err instanceof Error ? err.message : String(err));
           // Only clear state on explicit authentication errors (401)
           if (err instanceof AuthApiError && err.status === 401) {
-            // #region agent log
-            fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'auth.ts:initialize',message:'401 error - CLEARING TOKENS',data:{},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-            // #endregion
+            console.log('[Auth] 401 error - clearing tokens, user will be redirected to login');
             set({ user: null, tokens: null, isInitialized: true });
           } else {
-            // Keep existing tokens on network errors, just mark as initialized
+            // Keep existing user/tokens on network errors, just mark as initialized
             // User can still try to use the app - requests will fail if tokens invalid
+            console.log('[Auth] Network error, keeping existing auth state');
             set({ isInitialized: true });
           }
         }
@@ -287,8 +260,47 @@ function ensureHydrated(): Promise<void> {
 /**
  * Get the current access token (for tRPC)
  * Ensures store is hydrated before reading.
+ * Proactively refreshes token if it's about to expire.
  */
 export async function getAccessToken(): Promise<string | null> {
   await ensureHydrated();
-  return useAuthStore.getState().tokens?.accessToken ?? null;
+  const state = useAuthStore.getState();
+  const tokens = state.tokens;
+  
+  if (!tokens) {
+    return null;
+  }
+  
+  // Proactively refresh if token is expired or about to expire (5 minute buffer)
+  if (isTokenExpiringSoon(tokens.expiresAt, 5 * 60 * 1000)) {
+    console.log('[Auth] Token expiring soon, attempting refresh...');
+    const success = await state.refreshToken();
+    if (success) {
+      // Return the new token
+      return useAuthStore.getState().tokens?.accessToken ?? null;
+    }
+    // Refresh failed, return null (will trigger 401 and logout)
+    console.log('[Auth] Token refresh failed');
+    return null;
+  }
+  
+  return tokens.accessToken;
+}
+
+/**
+ * Check if token is expiring soon (within buffer milliseconds)
+ */
+function isTokenExpiringSoon(expiresAt: string, bufferMs: number): boolean {
+  const expiry = new Date(expiresAt).getTime();
+  const now = Date.now();
+  return expiry - now < bufferMs;
+}
+
+/**
+ * Handle 401 errors by clearing auth state.
+ * Call this when an API returns 401 Unauthorized.
+ */
+export function handleAuthError(): void {
+  console.log('[Auth] Handling auth error - clearing tokens');
+  useAuthStore.setState({ user: null, tokens: null });
 }

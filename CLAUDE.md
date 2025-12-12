@@ -23,37 +23,51 @@ The project replicates features from the `forreel` project at `/Users/josh/play/
 - **API**: tRPC with `@mediaserver/api-client` hooks
 
 ### Backend (apps/server)
-- **Runtime**: Node.js (with tsx for development)
+- **Runtime**: Node.js 20 (with tsx for development)
 - **Framework**: Hono
 - **API**: tRPC
 - **Database**: SQLite with Drizzle ORM
+- **Job Queue**: BullMQ with Valkey (Redis-compatible)
 - **Auth**: Custom JWT implementation
+
+**⚠️ IMPORTANT: The server uses Node.js, NOT Bun.** While Bun is available in the Nix flake for other tooling, the server runs with:
+- Development: `node --import tsx src/main.ts`
+- Production: `node dist/main.js`
 
 ### Package Manager
 - **Yarn 3.8.0** with PnP disabled (uses `node_modules`)
 - Always use `yarn` not `npm`
 
 ### Nix Development Environment
-This project uses a Nix flake to manage development dependencies. **Always execute commands within the Nix flake environment.**
 
-**Required:** Prefix all shell commands with `nix develop --command` or enter the shell first:
+**🚨 CRITICAL: ALL commands must run inside the Nix dev shell.**
+
+The flake provides essential dependencies and environment variables. Running commands outside the shell will fail.
+
 ```bash
-# Option 1: Prefix individual commands
-nix develop --command yarn install
-nix develop --command yarn nx run web:start
+# Recommended: Use the dev script (handles Valkey, server, and web)
+nix develop -c yarn dev      # Start all services
+nix develop -c yarn stop     # Stop all services
+nix develop -c yarn status   # Check service status
+nix develop -c yarn logs     # Tail all logs
 
-# Option 2: Enter the shell for multiple commands
+# For individual commands:
+nix develop -c yarn install
+nix develop -c yarn nx run web:typecheck
+nix develop -c yarn nx run-many -t lint
+
+# Or enter the shell for interactive work:
 nix develop
-yarn install
-yarn nx run web:start
+yarn dev
 ```
 
 The flake provides:
-- Node.js 22 and Yarn (via corepack)
+- Node.js 20 and Yarn (via corepack)
+- Valkey (Redis-compatible for job queues)
 - SQLite and ffmpeg
-- Required environment variables (`DATABASE_URL`, `JWT_SECRET`, etc.)
+- Required environment variables (`DATABASE_URL`, `JWT_SECRET`, `REDIS_URL`, etc.)
 
-**⚠️ Important:** Running commands outside the Nix flake will fail due to missing environment variables and potentially missing dependencies.
+**⚠️ Common Mistake:** Do NOT use `bun run` for the server. Always use `yarn dev` or `node`/`tsx` commands.
 
 ## Critical NativeWind/React Native Web Gotchas
 
@@ -165,40 +179,98 @@ Always use React Native components, not HTML elements.
 <TextInput value={} onChangeText={} />
 ```
 
+### 8. Don't Use Custom Setter Wrappers for Side Effects
+React Native Web's TextInput doesn't reliably call custom setter functions. Closures may capture stale state.
+
+**❌ Don't do this:**
+```tsx
+const [apiKey, setApiKeyInternal] = useState('');
+const [enabled, setEnabled] = useState(false);
+const [testResult, setTestResult] = useState(null);
+
+// Custom wrapper - unreliable with TextInput!
+const setApiKey = (value: string) => {
+  setApiKeyInternal(value);
+  setTestResult(null);  // May not execute
+  if (!value) setEnabled(false);  // May not execute
+};
+
+<TextInput value={apiKey} onChangeText={setApiKey} />
+```
+
+**✅ Do this instead - use `useEffect` for derived state changes:**
+```tsx
+const [apiKey, setApiKey] = useState('');
+const [enabled, setEnabled] = useState(false);
+const [testResult, setTestResult] = useState(null);
+const [initialized, setInitialized] = useState(false);
+
+// React to state changes with useEffect
+useEffect(() => {
+  if (!initialized) return;
+  setTestResult(null);  // Clear when key changes
+  if (!apiKey) setEnabled(false);  // Auto-disable if cleared
+}, [apiKey, initialized]);
+
+<TextInput value={apiKey} onChangeText={setApiKey} />
+```
+
+This pattern ensures side effects run reliably because React guarantees `useEffect` fires after state updates.
+
 ## Development Workflow
 
-### Running the Dev Server
+### Starting Development (Recommended)
 ```bash
-# Start web app (from within nix develop shell)
-nix develop --command yarn nx run web:start
+# Start everything: Valkey + Server + Web UI
+nix develop -c yarn dev
 
-# Or enter the shell first
-nix develop
-yarn nx run web:start
+# This starts:
+#   - Valkey on port 6379 (job queue)
+#   - Server on http://localhost:3000
+#   - Web UI on http://localhost:8081
+
+# Stop all services
+nix develop -c yarn stop
+
+# Check status
+nix develop -c yarn status
+
+# View logs
+nix develop -c yarn logs           # All logs
+nix develop -c yarn logs:server    # Server only
+nix develop -c yarn logs:web       # Web only
+```
+
+### Running Individual Apps (Manual)
+```bash
+# Start web app only
+nix develop -c yarn nx run web:start
 
 # Clear cache if styles aren't updating
-nix develop --command bash -c "cd apps/web && npx expo start --web --port 8081 --clear"
+nix develop -c bash -c "cd apps/web && npx expo start --web --port 8081 --clear"
 ```
 
 ### Running Tasks
 Always use Nx for running tasks (within Nix shell):
 ```bash
-nix develop --command yarn nx run web:typecheck
-nix develop --command yarn nx run web:lint
-nix develop --command yarn nx run-many -t typecheck
-nix develop --command yarn nx run-many -t lint
+nix develop -c yarn nx run web:typecheck
+nix develop -c yarn nx run web:lint
+nix develop -c yarn nx run-many -t typecheck
+nix develop -c yarn nx run-many -t lint
 ```
 
 ### Database
 ```bash
-nix develop --command yarn db:migrate    # Run migrations
-nix develop --command yarn db:generate   # Generate types from schema
-nix develop --command yarn db:studio     # Open Drizzle Studio
+nix develop -c yarn db:migrate    # Run migrations
+nix develop -c yarn db:generate   # Generate types from schema
+nix develop -c yarn db:studio     # Open Drizzle Studio
 ```
 
 ### Killing Stuck Processes
 ```bash
 pkill -f "expo start"
+pkill -f "node --import tsx"
+nix develop -c yarn stop          # Graceful shutdown of all services
 ```
 
 ## API Client Usage
@@ -432,9 +504,22 @@ scan: protectedProcedure
 
 ## Troubleshooting
 
+### Commands Failing with Missing Dependencies or Env Vars
+You're likely running outside the Nix dev shell. Always use:
+```bash
+nix develop -c <command>
+# or
+nix develop   # then run commands inside the shell
+```
+
+### Server Not Starting / API Calls Failing
+1. Check if services are running: `nix develop -c yarn status`
+2. Check logs: `nix develop -c yarn logs:server`
+3. Restart services: `nix develop -c yarn restart`
+
 ### Styles Not Updating
 1. Kill expo: `pkill -f "expo start"`
-2. Clear cache: `nix develop --command bash -c "cd apps/web && npx expo start --web --port 8081 --clear"`
+2. Clear cache: `nix develop -c bash -c "cd apps/web && npx expo start --web --port 8081 --clear"`
 
 ### Module Resolution Errors
 If packages from workspace aren't resolving, add them as direct dependencies in `apps/web/package.json`.

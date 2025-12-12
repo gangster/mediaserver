@@ -52,7 +52,7 @@ export default function LibrariesPage() {
 
   const handleFormSuccess = () => {
     handleCloseForm();
-    refetch();
+      refetch();
   };
 
   // Grid columns
@@ -75,12 +75,12 @@ export default function LibrariesPage() {
         </View>
       </Layout>
     );
-  }
+    }
 
   // Error
   if (error) {
-    return (
-      <Layout>
+  return (
+    <Layout>
         <View style={{ padding: 32 }}>
           <View
             style={{
@@ -95,7 +95,7 @@ export default function LibrariesPage() {
             <Feather name="alert-circle" size={48} color="#f87171" style={{ marginBottom: 16 }} />
             <Text style={{ color: '#f87171', fontSize: 18, fontWeight: '600', marginBottom: 8 }}>
               Failed to load libraries
-            </Text>
+              </Text>
             <Text style={{ color: '#a1a1aa', marginBottom: 16 }}>{error.message}</Text>
             <Pressable
               onPress={() => refetch()}
@@ -140,7 +140,7 @@ export default function LibrariesPage() {
               </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <Pressable
+                      <Pressable
                 onPress={() => scanAllMutation.mutate()}
                 disabled={scanAllMutation.isPending}
                 style={{
@@ -153,10 +153,10 @@ export default function LibrariesPage() {
                   borderRadius: 8,
                   opacity: scanAllMutation.isPending ? 0.5 : 1,
                 }}
-              >
+                      >
                 <Feather name="refresh-cw" size={18} color="#ffffff" />
                 <Text style={{ color: '#ffffff', fontWeight: '500' }}>Scan All</Text>
-              </Pressable>
+                      </Pressable>
               <Pressable
                 onPress={handleAddLibrary}
                 style={{
@@ -171,9 +171,9 @@ export default function LibrariesPage() {
               >
                 <Feather name="plus" size={18} color="#ffffff" />
                 <Text style={{ color: '#ffffff', fontWeight: '500' }}>Add Library</Text>
-              </Pressable>
-            </View>
-          </View>
+                      </Pressable>
+                    </View>
+                  </View>
 
           {/* Success message */}
           {scanAllMutation.isSuccess && (

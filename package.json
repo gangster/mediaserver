@@ -8,7 +8,13 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "nx run-many -t dev",
+    "dev": "./scripts/dev.sh start",
+    "stop": "./scripts/dev.sh stop",
+    "status": "./scripts/dev.sh status",
+    "restart": "./scripts/dev.sh restart",
+    "logs": "tail -f .dev/server.log .dev/web.log",
+    "logs:server": "tail -f .dev/server.log",
+    "logs:web": "tail -f .dev/web.log",
     "build": "nx run-many -t build",
     "test": "nx run-many -t test",
     "lint": "nx run-many -t lint",
@@ -18,7 +24,7 @@
     "db:migrate": "nx run @mediaserver/db:db:migrate",
     "db:generate": "nx run @mediaserver/db:db:generate",
     "db:studio": "nx run @mediaserver/db:db:studio",
-    "clean": "nx reset && rm -rf node_modules **/node_modules **/dist **/.turbo",
+    "clean": "./scripts/dev.sh stop; nx reset && rm -rf node_modules **/node_modules **/dist **/.turbo .dev",
     "prepare": "husky"
   },
   "devDependencies": {

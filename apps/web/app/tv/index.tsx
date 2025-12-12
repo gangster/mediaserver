@@ -239,15 +239,15 @@ export default function TVShowsPage() {
     <Layout>
       <ScrollView style={{ flex: 1, backgroundColor: '#09090b' }}>
         <View style={{ paddingHorizontal: 32, paddingVertical: 24 }}>
-          {/* Header */}
+        {/* Header */}
           <View style={{ marginBottom: 24 }}>
             <Text style={{ fontSize: 30, fontWeight: '700', color: '#fff', marginBottom: 4 }}>
-              TV Shows
-            </Text>
+            TV Shows
+          </Text>
             {filteredItems.length > 0 && (
               <Text style={{ color: '#a1a1aa', fontSize: 14 }}>
                 {filteredItems.length} {filteredItems.length === 1 ? 'show' : 'shows'} in your library
-              </Text>
+          </Text>
             )}
           </View>
 
@@ -271,7 +271,7 @@ export default function TVShowsPage() {
               onYearChange={handleYearChange}
               onPageChange={handlePageChange}
             />
-          </View>
+        </View>
 
           {/* Shows grid */}
           {showsLoading && offset === 0 ? (
@@ -287,14 +287,14 @@ export default function TVShowsPage() {
               }
             >
               {Array.from({ length: 12 }).map((_, i) => (
-                <View
-                  key={i}
+                  <View
+                    key={i}
                   style={
                     isGridLayout
                       ? { width: `${100 / columns}%`, paddingRight: gap }
                       : { width: '100%' }
                   }
-                >
+                  >
                   <ShowCardSkeleton variant={showsViewMode} />
                 </View>
               ))}
@@ -302,9 +302,9 @@ export default function TVShowsPage() {
           ) : paginatedItems.length === 0 ? (
             <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 64 }}>
               <Text style={{ color: '#a1a1aa', fontSize: 18 }}>{getEmptyMessage()}</Text>
-            </View>
+                  </View>
           ) : (
-            <View
+                  <View
               style={
                 isGridLayout
                   ? {
@@ -329,10 +329,10 @@ export default function TVShowsPage() {
                     variant={showsViewMode}
                     onClick={handleItemClick}
                     priority={index < 12}
-                  />
-                </View>
-              ))}
-            </View>
+                    />
+                  </View>
+                ))}
+          </View>
           )}
         </View>
       </ScrollView>

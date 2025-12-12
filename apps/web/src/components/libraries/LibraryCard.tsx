@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { View, Text, Pressable } from 'react-native';
 import { Ionicons, MaterialCommunityIcons, Feather } from '@expo/vector-icons';
 import { trpc } from '@mediaserver/api-client';
+import { useModalKeyboard } from '../../hooks';
 import type { Library } from '../../../app/libraries';
 
 interface LibraryCardProps {
@@ -55,6 +56,12 @@ export function LibraryCard({ library, onEdit, onRefresh }: LibraryCardProps) {
     onSuccess: () => {
       onRefresh();
     },
+  });
+
+  // Handle Escape key to close delete confirmation
+  useModalKeyboard({
+    onEscape: () => setShowDeleteConfirm(false),
+    isOpen: showDeleteConfirm,
   });
 
   // Handle scan status updates

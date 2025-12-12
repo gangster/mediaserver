@@ -97,3 +97,44 @@ export {
   useCompleteSetup,
 } from './useSetup.js';
 
+// Metadata hooks
+export {
+  useMetadataSearch,
+  useIdentifyMedia,
+  useRefreshMetadata,
+  useRefreshAllMetadata,
+  useUnmatchedItems,
+  useMetadataStats,
+} from './useMetadata.js';
+export type { UseMetadataSearchOptions, UseUnmatchedOptions } from './useMetadata.js';
+
+// Integration hooks
+export {
+  useIntegrations,
+  useIntegration,
+  useUpdateIntegration,
+  useTestIntegrationConnection,
+  useRatingSources,
+  useUpdateRatingSources,
+  usePrimaryProviders,
+  useUpdatePrimaryProviders,
+  useGetOAuthUrl,
+  useHandleOAuthCallback,
+  useDisconnectOAuth,
+  useOAuthStatus,
+} from './useIntegrations.js';
+
+// Job hooks
+export {
+  useJobs,
+  useJob,
+  useActiveJobs,
+  useJobStats,
+  useCancelJob,
+  useRetryJob,
+  useRemoveJob,
+  useClearCompletedJobs,
+  usePauseQueue,
+  useResumeQueue,
+} from './useJobs.js';
+

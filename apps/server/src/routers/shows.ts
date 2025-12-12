@@ -96,6 +96,13 @@ export const showsRouter = router({
       limit: limit + 1,
     });
 
+    // Get total count (for stats display)
+    const countResult = await ctx.db
+      .select({ count: sql<number>`count(*)` })
+      .from(tvShows)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+    const total = countResult[0]?.count ?? 0;
+
     const hasMore = results.length > limit;
     const items = hasMore ? results.slice(0, -1) : results;
     const nextCursor = hasMore ? items[items.length - 1]?.id ?? null : null;
@@ -103,6 +110,7 @@ export const showsRouter = router({
     return {
       items,
       nextCursor,
+      total,
     };
   }),
 

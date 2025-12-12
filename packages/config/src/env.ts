@@ -38,8 +38,8 @@ export const envSchema = z.object({
   // === Optional: Database (Turso) ===
   DATABASE_AUTH_TOKEN: z.string().optional(),
 
-  // === Optional: Redis (for multi-instance) ===
-  REDIS_URL: z.string().url().optional(),
+  // === Optional: Redis/Valkey (for job queue) ===
+  REDIS_URL: z.string().optional(),
 });
 
 /** Type for validated environment variables */

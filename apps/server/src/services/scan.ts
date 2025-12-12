@@ -9,6 +9,7 @@ import { scanLibrary } from '@mediaserver/scanner';
 import type { ScanProgress, ScanResult, ParsedMovie, ParsedEpisode } from '@mediaserver/scanner';
 import { logger } from '../lib/logger.js';
 import { dirname } from 'node:path';
+import { fetchPendingMovieMetadata, fetchPendingShowMetadata } from './metadata.js';
 
 /** Generate a unique ID */
 function generateId(): string {
@@ -47,10 +48,10 @@ export async function runLibraryScan(db: Database, jobId: string, libraryId: str
       ? JSON.parse(library.paths)
       : library.paths;
 
-    // Update job status to running
+    // Update job status to active
     await db.update(backgroundJobs)
       .set({
-        status: 'running',
+        status: 'active',
         startedAt: new Date().toISOString(),
       })
       .where(eq(backgroundJobs.id, jobId));
@@ -88,18 +89,42 @@ export async function runLibraryScan(db: Database, jobId: string, libraryId: str
       .set({ lastScannedAt: new Date().toISOString() })
       .where(eq(libraries.id, libraryId));
 
+    // Trigger metadata fetching for new items
+    log.info('Starting metadata fetch for pending items');
+    await db.update(backgroundJobs)
+      .set({
+        progressMessage: 'Fetching metadata...',
+      })
+      .where(eq(backgroundJobs.id, jobId));
+
+    let metadataStats: { matched: number; unmatched: number; errors: number };
+    try {
+      if (library.type === 'movie') {
+        metadataStats = await fetchPendingMovieMetadata(db, libraryId);
+      } else {
+        metadataStats = await fetchPendingShowMetadata(db, libraryId);
+      }
+      log.info(metadataStats, 'Metadata fetch completed');
+    } catch (error) {
+      log.error({ error }, 'Metadata fetch failed');
+      metadataStats = { matched: 0, unmatched: 0, errors: 1 };
+    }
+
     // Mark job as completed
     await db.update(backgroundJobs)
       .set({
         status: 'completed',
         progress: 100,
         completedAt: new Date().toISOString(),
-        result: JSON.stringify(stats),
-        progressMessage: `Added ${stats.added}, updated ${stats.updated}`,
+        result: JSON.stringify({
+          ...stats,
+          metadata: metadataStats,
+        }),
+        progressMessage: `Added ${stats.added}, matched ${metadataStats.matched}`,
       })
       .where(eq(backgroundJobs.id, jobId));
 
-    log.info(stats, 'Library scan completed');
+    log.info({ ...stats, metadata: metadataStats }, 'Library scan completed');
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     log.error({ error: message }, 'Library scan failed');

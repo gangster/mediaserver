@@ -9,7 +9,7 @@ node_modules/
 
 # Build outputs
 dist/
-build/
+build/  
 .next/
 out/
 *.tsbuildinfo
@@ -101,3 +101,8 @@ temp/
 
 # Direnv
 .direnv/
+
+# Valkey/Redis data
+.valkey/
+
+# Dev process management

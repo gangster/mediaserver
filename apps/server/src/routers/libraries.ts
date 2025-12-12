@@ -150,26 +150,26 @@ export const librariesRouter = router({
         orderBy: (libraries, { asc }) => [asc(libraries.name)],
       });
     } else {
-      // Other users see only libraries they have permission for
-      const permissions = await ctx.db.query.libraryPermissions.findMany({
-        where: and(
-          eq(libraryPermissions.userId, ctx.userId),
-          eq(libraryPermissions.canView, true)
-        ),
-      });
+    // Other users see only libraries they have permission for
+    const permissions = await ctx.db.query.libraryPermissions.findMany({
+      where: and(
+        eq(libraryPermissions.userId, ctx.userId),
+        eq(libraryPermissions.canView, true)
+      ),
+    });
 
-      const libraryIds = permissions.map((p) => p.libraryId);
-      if (libraryIds.length === 0) {
-        return [];
-      }
+    const libraryIds = permissions.map((p) => p.libraryId);
+    if (libraryIds.length === 0) {
+      return [];
+    }
 
       libraryList = await ctx.db.query.libraries.findMany({
-        where: sql`${libraries.id} IN (${sql.join(
-          libraryIds.map((id) => sql`${id}`),
-          sql`, `
-        )})`,
-        orderBy: (libraries, { asc }) => [asc(libraries.name)],
-      });
+      where: sql`${libraries.id} IN (${sql.join(
+        libraryIds.map((id) => sql`${id}`),
+        sql`, `
+      )})`,
+      orderBy: (libraries, { asc }) => [asc(libraries.name)],
+    });
     }
 
     // Add item counts for each library
@@ -383,7 +383,7 @@ export const librariesRouter = router({
           eq(backgroundJobs.type, 'scan'),
           eq(backgroundJobs.targetType, 'library'),
           eq(backgroundJobs.targetId, input.id),
-          eq(backgroundJobs.status, 'running')
+          eq(backgroundJobs.status, 'active')
         ),
       });
 
@@ -398,7 +398,7 @@ export const librariesRouter = router({
         type: 'scan',
         targetType: 'library',
         targetId: input.id,
-        status: 'pending',
+        status: 'waiting',
         createdBy: ctx.userId,
       });
 
@@ -432,7 +432,7 @@ export const librariesRouter = router({
             eq(backgroundJobs.type, 'scan'),
             eq(backgroundJobs.targetType, 'library'),
             eq(backgroundJobs.targetId, library.id),
-            eq(backgroundJobs.status, 'running')
+            eq(backgroundJobs.status, 'active')
           ),
         });
 
@@ -447,7 +447,7 @@ export const librariesRouter = router({
           type: 'scan',
           targetType: 'library',
           targetId: library.id,
-          status: 'pending',
+          status: 'waiting',
           createdBy: ctx.userId,
         });
 

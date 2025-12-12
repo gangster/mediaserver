@@ -16,7 +16,10 @@ import { appRouter } from './routers/app.js';
 import { createContext } from './context.js';
 import { healthRouter } from './routes/health.js';
 import { streamRouter } from './routes/stream.js';
+import { imagesRouter } from './routes/images.js';
 import { createLogger } from './lib/logger.js';
+import { initializeMetadataManager } from './services/metadata.js';
+import { initializeJobQueue, shutdownJobQueue } from './jobs/index.js';
 
 // Load environment variables
 const env = loadEnv();
@@ -29,6 +32,22 @@ await runMigrationsFromEnv();
 
 // Create database connection
 const db = createDatabaseFromEnv();
+
+// Initialize metadata manager (loads configs from DB)
+await initializeMetadataManager({}, env.TMDB_API_KEY, db);
+log.info('🎬 Metadata manager initialized');
+
+// Initialize job queue with Redis/Valkey
+if (env.REDIS_URL) {
+  try {
+    await initializeJobQueue(db, env.REDIS_URL);
+    log.info(`📋 Job queue initialized with ${env.REDIS_URL}`);
+  } catch (error) {
+    log.warn({ error }, '⚠️  Failed to connect to Redis/Valkey - job queue disabled');
+  }
+} else {
+  log.info('ℹ️  REDIS_URL not set - job queue disabled (jobs will run synchronously)');
+}
 
 // Create Hono app
 const app = new Hono();
@@ -56,13 +75,16 @@ app.route('/health', healthRouter);
 // Streaming routes (non-tRPC for HLS)
 app.route('/api/stream', streamRouter);
 
+// Image proxy routes
+app.route('/api/images', imagesRouter);
+
 // tRPC API
 app.use(
   '/api/*',
   trpcServer({
     router: appRouter,
     endpoint: '/api',
-    createContext: ({ req }) => createContext({ db, req, env }),
+    createContext: ({ req }) => createContext({ db, req, env }) as unknown as Record<string, unknown>,
   })
 );
 
@@ -89,13 +111,34 @@ const host = env.HOST;
 log.info(`🚀 Server starting on http://${host}:${port}`);
 log.info(`📡 tRPC API available at http://${host}:${port}/api`);
 log.info(`🎬 Streaming API available at http://${host}:${port}/api/stream`);
+log.info(`🖼️  Images API available at http://${host}:${port}/api/images`);
 log.info(`💚 Health check at http://${host}:${port}/health`);
 
-serve({
+const server = serve({
   fetch: app.fetch,
   port,
   hostname: host,
 });
+
+// Graceful shutdown
+async function shutdown() {
+  log.info('Shutting down...');
+  
+  // Shutdown job queue
+  try {
+    await shutdownJobQueue();
+  } catch {
+    // Ignore errors during shutdown
+  }
+  
+  // Close server
+  server.close();
+  
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 // Export types for client
 export type { AppRouter } from './routers/app.js';

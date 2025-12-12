@@ -1,15 +1,15 @@
 /**
  * Web-optimized HeroBanner component
  *
- * Wraps @mediaserver/ui HeroBanner with web-specific features:
- * - Responsive height variants (50vh mobile → 70vh desktop)
+ * Features:
+ * - Responsive height based on viewport
  * - Responsive text sizing
  * - Button stacking on mobile
  * - Overview hidden on mobile
  */
 
 import { useState, useCallback } from 'react';
-import { View, Text, Pressable, Image } from 'react-native';
+import { View, Text, Pressable, Image, useWindowDimensions } from 'react-native';
 import { Link } from 'expo-router';
 
 /** Media item for banner */
@@ -53,17 +53,19 @@ function getBackdropUrl(item: BannerItem, baseUrl: string): string {
  */
 function Rating({ value }: { value: number }) {
   return (
-    <View className="flex flex-row items-center gap-1">
-      <svg
-        className="w-5 h-5 text-yellow-400"
-        fill="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-      </svg>
-      <Text className="text-white font-medium">{value.toFixed(1)}</Text>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+      <Text style={{ color: '#facc15', fontSize: 16 }}>★</Text>
+      <Text style={{ color: '#fff', fontWeight: '500', fontSize: 14 }}>{value.toFixed(1)}</Text>
     </View>
   );
+}
+
+/** Calculate responsive padding */
+function useResponsivePadding(): number {
+  const { width } = useWindowDimensions();
+  if (width >= 1024) return 32;
+  if (width >= 640) return 24;
+  return 16;
 }
 
 /**
@@ -78,6 +80,8 @@ export function WebHeroBanner({
 }: WebHeroBannerProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const horizontalPadding = useResponsivePadding();
 
   const backdropUrl = getBackdropUrl(item, imageBaseUrl);
   const hasBackdrop = !!item.backdropPath && !imageError;
@@ -90,136 +94,228 @@ export function WebHeroBanner({
     setImageError(true);
   }, []);
 
-  // Responsive height classes
-  const heightClass =
-    variant === 'full'
-      ? 'h-[50vh] sm:h-[60vh] lg:h-[70vh] min-h-[350px] sm:min-h-[400px] lg:min-h-[500px]'
-      : 'h-[40vh] sm:h-[45vh] lg:h-[50vh] min-h-[280px] sm:min-h-[300px] lg:min-h-[350px]';
+  // Responsive calculations
+  const isSmall = screenWidth >= 640;
+  const isLarge = screenWidth >= 1024;
+  const isXL = screenWidth >= 1280;
+
+  // Height based on viewport and variant
+  let bannerHeight: number;
+  if (variant === 'full') {
+    if (isLarge) bannerHeight = Math.max(screenHeight * 0.7, 500);
+    else if (isSmall) bannerHeight = Math.max(screenHeight * 0.6, 400);
+    else bannerHeight = Math.max(screenHeight * 0.5, 350);
+  } else {
+    if (isLarge) bannerHeight = Math.max(screenHeight * 0.5, 350);
+    else if (isSmall) bannerHeight = Math.max(screenHeight * 0.45, 300);
+    else bannerHeight = Math.max(screenHeight * 0.4, 280);
+  }
+
+  // Font sizes
+  const titleFontSize = isXL ? 48 : isLarge ? 40 : isSmall ? 32 : 24;
+  const overviewFontSize = isLarge ? 18 : isSmall ? 16 : 14;
+  const buttonPaddingH = isSmall ? 24 : 16;
+  const buttonPaddingV = isSmall ? 12 : 10;
 
   const linkTo = item.type === 'movie' ? `/movies/${item.id}` : `/tv/${item.id}`;
 
   return (
-    <View className={`relative ${heightClass} overflow-hidden`}>
+    <View style={{ position: 'relative', height: bannerHeight, overflow: 'hidden' }}>
       {/* Background image */}
-      <View className="absolute inset-0">
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
         {/* Loading state */}
         {!imageLoaded && hasBackdrop && (
-          <View className="absolute inset-0 bg-zinc-900 animate-pulse" />
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: '#09090b',
+            }}
+          />
         )}
 
         {/* Placeholder gradient for missing backdrop */}
         {!hasBackdrop && (
-          <View className="absolute inset-0 bg-gradient-to-br from-zinc-800 via-zinc-900 to-black" />
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: '#18181b',
+            }}
+          />
         )}
 
         {/* Actual backdrop */}
         {hasBackdrop && (
           <Image
             source={{ uri: backdropUrl }}
-            className={`w-full h-full ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
+            style={{
+              width: '100%',
+              height: '120%', // Slightly larger to allow positioning
+              opacity: imageLoaded ? 1 : 0,
+              // @ts-expect-error - web-only objectPosition
+              objectPosition: 'center top', // Show top of image (faces, etc.)
+            }}
             resizeMode="cover"
             onLoad={handleImageLoad}
             onError={handleImageError}
           />
         )}
 
-        {/* Overlay gradients */}
-        <View className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-zinc-900/50 to-transparent" />
-        <View className="absolute inset-0 bg-gradient-to-r from-zinc-900/80 via-zinc-900/40 to-transparent" />
+        {/* Bottom gradient overlay - fades to page background (#09090b = zinc-950) */}
+        <View
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: '60%',
+            // @ts-expect-error - web-only gradient
+            background: 'linear-gradient(to top, #09090b 0%, #09090b 5%, rgba(9, 9, 11, 0.9) 20%, rgba(9, 9, 11, 0.6) 40%, transparent 100%)',
+          }}
+        />
+
+        {/* Left gradient overlay for text readability */}
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: '70%',
+            // @ts-expect-error - web-only gradient
+            background: 'linear-gradient(to right, rgba(9, 9, 11, 0.85) 0%, rgba(9, 9, 11, 0.5) 40%, transparent 100%)',
+          }}
+        />
       </View>
 
       {/* Content */}
-      <View className="absolute inset-0 flex justify-end">
-        <View className="w-full max-w-3xl px-4 sm:px-6 lg:px-8 pb-8 sm:pb-12 lg:pb-16 gap-2 sm:gap-3 lg:gap-4">
-          {/* Title - responsive text sizing */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          justifyContent: 'flex-end',
+        }}
+      >
+        <View
+          style={{
+            maxWidth: 768,
+            paddingHorizontal: horizontalPadding,
+            paddingBottom: isLarge ? 64 : isSmall ? 48 : 32,
+            gap: isLarge ? 16 : isSmall ? 12 : 8,
+          }}
+        >
+          {/* Title */}
           <Text
-            className="text-2xl sm:text-4xl lg:text-5xl xl:text-6xl font-bold text-white"
             numberOfLines={2}
-            // @ts-expect-error - web-only text shadow
-            style={{ textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}
+            style={{
+              fontSize: titleFontSize,
+              fontWeight: '700',
+              color: '#fff',
+              textShadowColor: 'rgba(0,0,0,0.5)',
+              textShadowOffset: { width: 0, height: 2 },
+              textShadowRadius: 4,
+            }}
           >
             {item.title}
           </Text>
 
           {/* Metadata */}
-          <View className="flex flex-row flex-wrap items-center gap-2 sm:gap-4">
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: isSmall ? 16 : 8 }}>
             {item.voteAverage != null && item.voteAverage > 0 && (
               <Rating value={item.voteAverage} />
             )}
             {item.year && (
-              <Text className="text-xs sm:text-sm text-zinc-300">{item.year}</Text>
+              <Text style={{ fontSize: isSmall ? 14 : 12, color: '#d4d4d8' }}>{item.year}</Text>
             )}
           </View>
 
           {/* Overview - hidden on mobile */}
-          {item.overview && (
+          {isSmall && item.overview && (
             <Text
-              className="hidden sm:flex text-sm sm:text-base lg:text-lg text-zinc-200 max-w-2xl"
               numberOfLines={3}
+              style={{
+                fontSize: overviewFontSize,
+                color: '#e4e4e7',
+                maxWidth: 512,
+                lineHeight: overviewFontSize * 1.5,
+              }}
             >
               {item.overview}
             </Text>
           )}
 
-          {/* Action buttons - stack on mobile */}
-          <View className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-1 sm:pt-2">
+          {/* Action buttons */}
+          <View
+            style={{
+              flexDirection: isSmall ? 'row' : 'column',
+              gap: isSmall ? 12 : 8,
+              paddingTop: isSmall ? 8 : 4,
+            }}
+          >
             <Pressable
-              onPress={() => (onPlay ? onPlay(item) : null)}
-              className="flex flex-row items-center justify-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 bg-white rounded-lg active:bg-zinc-200 touch-target"
+              onPress={() => onPlay?.(item)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                paddingHorizontal: buttonPaddingH,
+                paddingVertical: buttonPaddingV,
+                backgroundColor: '#fff',
+                borderRadius: 8,
+              }}
             >
-              <svg
-                className="w-5 h-5 sm:w-6 sm:h-6 text-black"
-                fill="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              <Text className="text-black font-semibold">Play</Text>
+              <Text style={{ color: '#000', fontSize: 16 }}>▶</Text>
+              <Text style={{ color: '#000', fontWeight: '600', fontSize: 14 }}>Play</Text>
             </Pressable>
 
             {onMoreInfo ? (
               <Pressable
                 onPress={() => onMoreInfo(item)}
-                className="flex flex-row items-center justify-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 bg-zinc-600/80 rounded-lg active:bg-zinc-600 touch-target"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  paddingHorizontal: buttonPaddingH,
+                  paddingVertical: buttonPaddingV,
+                  backgroundColor: 'rgba(82, 82, 91, 0.8)',
+                  borderRadius: 8,
+                }}
               >
-                <svg
-                  className="w-5 h-5 sm:w-6 sm:h-6 text-white"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                <Text className="hidden sm:flex text-white font-semibold">
-                  More Info
+                <Text style={{ color: '#fff', fontSize: 16 }}>ⓘ</Text>
+                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
+                  {isSmall ? 'More Info' : 'Info'}
                 </Text>
-                <Text className="flex sm:hidden text-white font-semibold">Info</Text>
               </Pressable>
             ) : (
               <Link href={linkTo as '/movies/[id]'} asChild>
-                <Pressable className="flex flex-row items-center justify-center gap-2 px-4 sm:px-6 py-2.5 sm:py-3 bg-zinc-600/80 rounded-lg active:bg-zinc-600 touch-target">
-                  <svg
-                    className="w-5 h-5 sm:w-6 sm:h-6 text-white"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <Text className="hidden sm:flex text-white font-semibold">
-                    More Info
+                <Pressable
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    paddingHorizontal: buttonPaddingH,
+                    paddingVertical: buttonPaddingV,
+                    backgroundColor: 'rgba(82, 82, 91, 0.8)',
+                    borderRadius: 8,
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 16 }}>ⓘ</Text>
+                  <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>
+                    {isSmall ? 'More Info' : 'Info'}
                   </Text>
-                  <Text className="flex sm:hidden text-white font-semibold">Info</Text>
                 </Pressable>
               </Link>
             )}
@@ -238,39 +334,108 @@ export function WebHeroBannerSkeleton({
 }: {
   variant?: 'full' | 'compact';
 }) {
-  const heightClass =
-    variant === 'full'
-      ? 'h-[50vh] sm:h-[60vh] lg:h-[70vh] min-h-[350px] sm:min-h-[400px] lg:min-h-[500px]'
-      : 'h-[40vh] sm:h-[45vh] lg:h-[50vh] min-h-[280px] sm:min-h-[300px] lg:min-h-[350px]';
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const horizontalPadding = useResponsivePadding();
+
+  const isSmall = screenWidth >= 640;
+  const isLarge = screenWidth >= 1024;
+
+  let bannerHeight: number;
+  if (variant === 'full') {
+    if (isLarge) bannerHeight = Math.max(screenHeight * 0.7, 500);
+    else if (isSmall) bannerHeight = Math.max(screenHeight * 0.6, 400);
+    else bannerHeight = Math.max(screenHeight * 0.5, 350);
+  } else {
+    if (isLarge) bannerHeight = Math.max(screenHeight * 0.5, 350);
+    else if (isSmall) bannerHeight = Math.max(screenHeight * 0.45, 300);
+    else bannerHeight = Math.max(screenHeight * 0.4, 280);
+  }
 
   return (
-    <View className={`relative ${heightClass} bg-zinc-900`}>
+    <View style={{ position: 'relative', height: bannerHeight, backgroundColor: '#09090b' }}>
       {/* Gradient overlay */}
-      <View className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-zinc-900/50 to-zinc-800" />
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          // @ts-expect-error - web-only gradient
+          background: 'linear-gradient(to top, #09090b 0%, rgba(39, 39, 42, 0.5) 50%, #27272a 100%)',
+        }}
+      />
 
       {/* Content skeleton */}
-      <View className="absolute inset-0 flex justify-end">
-        <View className="w-full max-w-3xl px-4 sm:px-6 lg:px-8 pb-8 sm:pb-12 lg:pb-16 gap-2 sm:gap-3 lg:gap-4">
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          justifyContent: 'flex-end',
+        }}
+      >
+        <View
+          style={{
+            maxWidth: 768,
+            paddingHorizontal: horizontalPadding,
+            paddingBottom: isLarge ? 64 : isSmall ? 48 : 32,
+            gap: isLarge ? 16 : isSmall ? 12 : 8,
+          }}
+        >
           {/* Title skeleton */}
-          <View className="h-8 sm:h-10 lg:h-12 bg-zinc-800 rounded-lg animate-pulse w-2/3" />
+          <View
+            style={{
+              height: isLarge ? 48 : isSmall ? 40 : 32,
+              width: '66%',
+              backgroundColor: '#3f3f46',
+              borderRadius: 8,
+            }}
+          />
 
           {/* Metadata skeleton */}
-          <View className="flex flex-row gap-2 sm:gap-4">
-            <View className="h-4 sm:h-5 w-12 sm:w-16 bg-zinc-800 rounded animate-pulse" />
-            <View className="h-4 sm:h-5 w-10 sm:w-12 bg-zinc-800 rounded animate-pulse" />
+          <View style={{ flexDirection: 'row', gap: isSmall ? 16 : 8 }}>
+            <View style={{ height: isSmall ? 20 : 16, width: 64, backgroundColor: '#3f3f46', borderRadius: 4 }} />
+            <View style={{ height: isSmall ? 20 : 16, width: 48, backgroundColor: '#3f3f46', borderRadius: 4 }} />
           </View>
 
           {/* Overview skeleton - hidden on mobile */}
-          <View className="hidden sm:flex flex-col gap-2">
-            <View className="h-4 bg-zinc-800 rounded animate-pulse w-full" />
-            <View className="h-4 bg-zinc-800 rounded animate-pulse w-4/5" />
-            <View className="h-4 bg-zinc-800 rounded animate-pulse w-2/3 hidden lg:flex" />
-          </View>
+          {isSmall && (
+            <View style={{ gap: 8 }}>
+              <View style={{ height: 16, width: '100%', backgroundColor: '#3f3f46', borderRadius: 4 }} />
+              <View style={{ height: 16, width: '80%', backgroundColor: '#3f3f46', borderRadius: 4 }} />
+              {isLarge && (
+                <View style={{ height: 16, width: '66%', backgroundColor: '#3f3f46', borderRadius: 4 }} />
+              )}
+            </View>
+          )}
 
           {/* Button skeleton */}
-          <View className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-1 sm:pt-2">
-            <View className="h-10 sm:h-12 w-full sm:w-24 bg-zinc-800 rounded-lg animate-pulse" />
-            <View className="h-10 sm:h-12 w-full sm:w-28 bg-zinc-700 rounded-lg animate-pulse" />
+          <View
+            style={{
+              flexDirection: isSmall ? 'row' : 'column',
+              gap: isSmall ? 12 : 8,
+              paddingTop: isSmall ? 8 : 4,
+            }}
+          >
+            <View
+              style={{
+                height: isSmall ? 48 : 40,
+                width: isSmall ? 96 : '100%',
+                backgroundColor: '#3f3f46',
+                borderRadius: 8,
+              }}
+            />
+            <View
+              style={{
+                height: isSmall ? 48 : 40,
+                width: isSmall ? 112 : '100%',
+                backgroundColor: '#52525b',
+                borderRadius: 8,
+              }}
+            />
           </View>
         </View>
       </View>

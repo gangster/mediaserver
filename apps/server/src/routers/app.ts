@@ -15,6 +15,9 @@ import { playbackRouter } from './playback.js';
 import { searchRouter } from './search.js';
 import { settingsRouter } from './settings.js';
 import { setupRouter } from './setup.js';
+import { metadataRouter } from './metadata.js';
+import { integrationsRouter } from './integrations.js';
+import { jobsRouter } from './jobs.js';
 
 /**
  * Main application router.
@@ -32,6 +35,9 @@ export const appRouter = router({
   search: searchRouter,
   settings: settingsRouter,
   setup: setupRouter,
+  metadata: metadataRouter,
+  integrations: integrationsRouter,
+  jobs: jobsRouter,
 });
 
 /** Type of the app router - used for client type inference */

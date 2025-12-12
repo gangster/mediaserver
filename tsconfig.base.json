@@ -44,6 +44,8 @@
       "@mediaserver/licensing/*": ["packages/licensing/src/*"],
       "@mediaserver/scanner": ["packages/scanner/src/index.ts"],
       "@mediaserver/scanner/*": ["packages/scanner/src/*"],
+      "@mediaserver/metadata": ["packages/metadata/src/index.ts"],
+      "@mediaserver/metadata/*": ["packages/metadata/src/*"],
       "@mediaserver/transcoder": ["packages/transcoder/src/index.ts"],
       "@mediaserver/transcoder/*": ["packages/transcoder/src/*"],
       "@mediaserver/images": ["packages/images/src/index.ts"],

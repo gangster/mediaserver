@@ -1,17 +1,16 @@
 /**
  * Web-optimized MediaRow component
  *
- * Wraps @mediaserver/ui MediaCard with web-specific features:
+ * Horizontal scrolling row of media cards with:
  * - Responsive card widths (2-6 cards based on viewport)
- * - Scroll arrows on desktop (appear on hover)
- * - Snap scrolling on mobile
- * - Horizontal scrollbar hidden
+ * - Scroll arrows on desktop
+ * - Proper spacing and sizing for React Native Web
  */
 
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, useWindowDimensions, Image } from 'react-native';
 import { Link } from 'expo-router';
-import { MediaCard, SkeletonMediaCard, type MediaRowItem } from '@mediaserver/ui';
+import type { MediaRowItem } from '@mediaserver/ui';
 
 export interface WebMediaRowProps<T extends MediaRowItem> {
   /** Section title */
@@ -26,45 +25,214 @@ export interface WebMediaRowProps<T extends MediaRowItem> {
   skeletonCount?: number;
   /** On item press callback */
   onItemPress?: (item: T) => void;
-  /** Image base URL for posters */
-  imageBaseUrl?: string;
 }
 
-/**
- * Scroll arrow button (desktop only)
- */
-function ScrollArrow({
-  direction,
-  onPress,
-  visible,
-}: {
-  direction: 'left' | 'right';
-  onPress: () => void;
-  visible: boolean;
-}) {
-  if (!visible) return null;
+/** Calculate responsive padding to match px-4 sm:px-6 lg:px-8 */
+function useResponsivePadding(): number {
+  const { width } = useWindowDimensions();
+  if (width >= 1024) return 32; // lg: px-8
+  if (width >= 640) return 24;  // sm: px-6
+  return 16;                     // default: px-4
+}
+
+/** Calculate card width based on screen size */
+function useCardWidth(): number {
+  const { width } = useWindowDimensions();
+  const padding = useResponsivePadding() * 2; // Both sides
+  const gap = 12; // Gap between cards
+  
+  // Determine number of visible cards based on breakpoints
+  let visibleCards: number;
+  if (width >= 1280) {
+    visibleCards = 6; // xl
+  } else if (width >= 1024) {
+    visibleCards = 5; // lg
+  } else if (width >= 768) {
+    visibleCards = 4; // md
+  } else if (width >= 640) {
+    visibleCards = 3; // sm
+  } else {
+    visibleCards = 2; // xs
+  }
+  
+  // Calculate card width
+  const availableWidth = width - padding;
+  const totalGaps = (visibleCards - 1) * gap;
+  const cardWidth = Math.floor((availableWidth - totalGaps) / visibleCards);
+  
+  // Cap at reasonable max
+  return Math.min(cardWidth, 185);
+}
+
+/** Rating badge */
+function RatingBadge({ rating }: { rating: number }) {
+  const color =
+    rating >= 7.5
+      ? '#10b981' // emerald-500
+      : rating >= 6
+        ? '#eab308' // yellow-500
+        : rating >= 4
+          ? '#f97316' // orange-500
+          : '#ef4444'; // red-500
 
   return (
-    <Pressable
-      onPress={onPress}
-      className={`absolute top-1/2 -translate-y-1/2 z-10 w-10 h-10 hidden lg:flex items-center justify-center
-        bg-black/70 active:bg-black/90 rounded-full
-        ${direction === 'left' ? 'left-2' : 'right-2'}`}
+    <View
+      style={{
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        backgroundColor: color,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+      }}
     >
-      <svg
-        className={`w-6 h-6 text-white ${direction === 'left' ? 'rotate-180' : ''}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
+      <Text style={{ color: '#fff', fontSize: 11, fontWeight: '700' }}>
+        ★ {rating.toFixed(1)}
+      </Text>
+    </View>
+  );
+}
+
+/** Poster placeholder */
+function PosterPlaceholder({ title }: { title: string }) {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: '#3f3f46',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ fontSize: 32, color: 'rgba(255,255,255,0.3)', fontWeight: '700' }}>
+        {title.charAt(0).toUpperCase()}
+      </Text>
+    </View>
+  );
+}
+
+/** Single media card */
+function MediaRowCard({
+  item,
+  cardWidth,
+  onPress,
+}: {
+  item: MediaRowItem;
+  cardWidth: number;
+  onPress?: () => void;
+}) {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  
+  const hasImage = !!item.posterPath && !imageError;
+  const hasRating = item.rating != null && item.rating > 0;
+  const cardHeight = Math.floor(cardWidth * 1.5); // 2:3 aspect ratio
+
+  return (
+    <Pressable onPress={onPress} style={{ width: cardWidth }}>
+      {/* Poster */}
+      <View
+        style={{
+          width: cardWidth,
+          height: cardHeight,
+          borderRadius: 8,
+          overflow: 'hidden',
+          backgroundColor: '#27272a',
+        }}
       >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M9 5l7 7-7 7"
-        />
-      </svg>
+        {/* Loading skeleton */}
+        {!imageLoaded && hasImage && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: '#3f3f46',
+            }}
+          />
+        )}
+
+        {/* Placeholder */}
+        {!hasImage && <PosterPlaceholder title={item.title} />}
+
+        {/* Image */}
+        {hasImage && (
+          <Image
+            source={{ uri: item.posterPath! }}
+            style={{
+              width: '100%',
+              height: '100%',
+              opacity: imageLoaded ? 1 : 0,
+            }}
+            onLoad={() => setImageLoaded(true)}
+            onError={() => setImageError(true)}
+            resizeMode="cover"
+          />
+        )}
+
+        {/* Rating badge */}
+        {hasRating && <RatingBadge rating={item.rating!} />}
+      </View>
+
+      {/* Title and year */}
+      <View style={{ marginTop: 8 }}>
+        <Text
+          numberOfLines={1}
+          style={{ color: '#fff', fontSize: 13, fontWeight: '500' }}
+        >
+          {item.title}
+        </Text>
+        {item.year && (
+          <Text style={{ color: '#71717a', fontSize: 12, marginTop: 2 }}>
+            {item.year}
+          </Text>
+        )}
+      </View>
     </Pressable>
+  );
+}
+
+/** Skeleton card */
+function SkeletonCard({ cardWidth }: { cardWidth: number }) {
+  const cardHeight = Math.floor(cardWidth * 1.5);
+  
+  return (
+    <View style={{ width: cardWidth }}>
+      <View
+        style={{
+          width: cardWidth,
+          height: cardHeight,
+          borderRadius: 8,
+          backgroundColor: '#3f3f46',
+        }}
+      />
+      <View style={{ marginTop: 8 }}>
+        <View
+          style={{
+            height: 14,
+            width: '75%',
+            backgroundColor: '#3f3f46',
+            borderRadius: 4,
+          }}
+        />
+        <View
+          style={{
+            height: 12,
+            width: '50%',
+            backgroundColor: '#3f3f46',
+            borderRadius: 4,
+            marginTop: 4,
+          }}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -78,15 +246,17 @@ export function WebMediaRow<T extends MediaRowItem>({
   isLoading = false,
   skeletonCount = 8,
   onItemPress,
-  imageBaseUrl = 'http://localhost:3000/api/images',
 }: WebMediaRowProps<T>) {
   const scrollRef = useRef<ScrollView>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const cardWidth = useCardWidth();
+  const horizontalPadding = useResponsivePadding();
+  const { width: screenWidth } = useWindowDimensions();
+  const isDesktop = screenWidth >= 1024;
 
   // Update scroll button visibility
   const updateScrollButtons = useCallback((): void => {
-    // ScrollView doesn't expose scrollLeft on native, this is web-only
     const container = scrollRef.current as unknown as {
       scrollLeft?: number;
       scrollWidth?: number;
@@ -107,7 +277,6 @@ export function WebMediaRow<T extends MediaRowItem>({
     const container = scrollRef.current;
     if (!container) return undefined;
 
-    // Web-only: add scroll event listener
     const webContainer = container as unknown as HTMLElement;
     if (typeof webContainer.addEventListener === 'function') {
       updateScrollButtons();
@@ -139,80 +308,105 @@ export function WebMediaRow<T extends MediaRowItem>({
     });
   }, []);
 
-  // Get poster URL for an item
-  const getPosterUrl = (item: T): string | null => {
-    if (!item.posterPath) return null;
-    // Assuming posterPath is like /movies/{id}/poster or a TMDB path
-    if (item.posterPath.startsWith('http')) {
-      return item.posterPath;
-    }
-    return `${imageBaseUrl}${item.posterPath}`;
-  };
-
   // Don't render empty rows
   if (!isLoading && data.length === 0) {
     return null;
   }
 
   const items = isLoading ? Array.from({ length: skeletonCount }) : data;
+  const gap = 12;
 
   return (
-    <View className="relative group/row mb-8">
+    <View style={{ marginBottom: 32 }}>
       {/* Header */}
-      <View className="flex flex-row items-center justify-between mb-3 sm:mb-4 px-4 sm:px-6 lg:px-8">
-        <Text className="text-lg sm:text-xl font-semibold text-white">{title}</Text>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 16,
+          paddingHorizontal: horizontalPadding,
+        }}
+      >
+        <Text style={{ fontSize: 20, fontWeight: '600', color: '#fff' }}>{title}</Text>
         {seeAllLink && !isLoading && data.length > 0 && (
           <Link href={seeAllLink as '/movies'} asChild>
-            <Pressable className="touch-target">
-              <Text className="text-sm text-emerald-400">See All →</Text>
+            <Pressable>
+              <Text style={{ fontSize: 14, color: '#34d399' }}>See All →</Text>
             </Pressable>
           </Link>
         )}
       </View>
 
       {/* Scrollable container */}
-      <View className="relative">
-        {/* Scroll arrows - desktop only */}
-        <ScrollArrow
-          direction="left"
-          onPress={() => scroll('left')}
-          visible={canScrollLeft}
-        />
-        <ScrollArrow
-          direction="right"
-          onPress={() => scroll('right')}
-          visible={canScrollRight}
-        />
+      <View style={{ position: 'relative' }}>
+        {/* Left scroll arrow */}
+        {isDesktop && canScrollLeft && (
+          <Pressable
+            onPress={() => scroll('left')}
+            style={{
+              position: 'absolute',
+              left: horizontalPadding,
+              top: '50%',
+              transform: [{ translateY: -20 }],
+              zIndex: 10,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 20 }}>‹</Text>
+          </Pressable>
+        )}
+
+        {/* Right scroll arrow */}
+        {isDesktop && canScrollRight && (
+          <Pressable
+            onPress={() => scroll('right')}
+            style={{
+              position: 'absolute',
+              right: horizontalPadding,
+              top: '50%',
+              transform: [{ translateY: -20 }],
+              zIndex: 10,
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              backgroundColor: 'rgba(0,0,0,0.7)',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: '#fff', fontSize: 20 }}>›</Text>
+          </Pressable>
+        )}
 
         {/* Cards container */}
         <ScrollView
           ref={scrollRef}
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 16 }}
-          className="py-2 sm:py-4"
+          contentContainerStyle={{
+            paddingHorizontal: horizontalPadding,
+            gap: gap,
+          }}
+          style={{ paddingVertical: 8 }}
         >
-          {items.map((item, index) => (
-            <View
-              key={isLoading ? index : (item as T).id}
-              className="flex-shrink-0 mr-3 sm:mr-4 w-[calc(50vw-24px)] sm:w-[calc(33.333vw-24px)] md:w-[calc(25vw-24px)] lg:w-[calc(20vw-24px)] xl:w-[calc(16.666vw-24px)] max-w-[185px]"
-            >
-              {isLoading ? (
-                <SkeletonMediaCard />
-              ) : (
-                <MediaCard
-                  posterUrl={getPosterUrl(item as T)}
-                  title={(item as T).title}
-                  subtitle={(item as T).subtitle ?? ((item as T).year ? String((item as T).year) : undefined)}
-                  progress={(item as T).progress}
-                  isWatched={(item as T).isWatched}
-                  rating={(item as T).rating ?? undefined}
-                  size="md"
-                  onPress={() => onItemPress?.(item as T)}
-                />
-              )}
-            </View>
-          ))}
+          {items.map((item, index) =>
+            isLoading ? (
+              <SkeletonCard key={index} cardWidth={cardWidth} />
+            ) : (
+              <MediaRowCard
+                key={(item as T).id}
+                item={item as T}
+                cardWidth={cardWidth}
+                onPress={() => onItemPress?.(item as T)}
+              />
+            )
+          )}
         </ScrollView>
       </View>
     </View>
@@ -220,3 +414,4 @@ export function WebMediaRow<T extends MediaRowItem>({
 }
 
 export default WebMediaRow;
+export type { MediaRowItem };

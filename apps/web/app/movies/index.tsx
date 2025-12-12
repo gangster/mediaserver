@@ -239,7 +239,7 @@ export default function MoviesPage() {
     <Layout>
       <ScrollView style={{ flex: 1, backgroundColor: '#09090b' }}>
         <View style={{ paddingHorizontal: 32, paddingVertical: 24 }}>
-          {/* Header */}
+        {/* Header */}
           <View style={{ marginBottom: 24 }}>
             <Text style={{ fontSize: 30, fontWeight: '700', color: '#fff', marginBottom: 4 }}>
               Movies
@@ -247,7 +247,7 @@ export default function MoviesPage() {
             {filteredItems.length > 0 && (
               <Text style={{ color: '#a1a1aa', fontSize: 14 }}>
                 {filteredItems.length} {filteredItems.length === 1 ? 'movie' : 'movies'} in your library
-              </Text>
+          </Text>
             )}
           </View>
 
@@ -271,7 +271,7 @@ export default function MoviesPage() {
               onYearChange={handleYearChange}
               onPageChange={handlePageChange}
             />
-          </View>
+        </View>
 
           {/* Movies grid */}
           {moviesLoading && offset === 0 ? (
@@ -287,14 +287,14 @@ export default function MoviesPage() {
               }
             >
               {Array.from({ length: 12 }).map((_, i) => (
-                <View
-                  key={i}
+                  <View
+                    key={i}
                   style={
                     isGridLayout
                       ? { width: `${100 / columns}%`, paddingRight: gap }
                       : { width: '100%' }
                   }
-                >
+                  >
                   <MovieCardSkeleton variant={moviesViewMode} />
                 </View>
               ))}
@@ -302,9 +302,9 @@ export default function MoviesPage() {
           ) : paginatedItems.length === 0 ? (
             <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 64 }}>
               <Text style={{ color: '#a1a1aa', fontSize: 18 }}>{getEmptyMessage()}</Text>
-            </View>
+                  </View>
           ) : (
-            <View
+                  <View
               style={
                 isGridLayout
                   ? {
@@ -329,10 +329,10 @@ export default function MoviesPage() {
                     variant={moviesViewMode}
                     onClick={handleItemClick}
                     priority={index < 12}
-                  />
-                </View>
-              ))}
-            </View>
+                    />
+                  </View>
+                ))}
+          </View>
           )}
         </View>
       </ScrollView>

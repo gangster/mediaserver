@@ -213,6 +213,21 @@ export class ServiceUnavailableError extends AppError {
 }
 
 /**
+ * Error from external service calls (APIs, databases, etc.)
+ * Used to wrap and identify failures from third-party services.
+ */
+export class ExternalServiceError extends AppError {
+  /** The service that failed (e.g., 'TMDB', 'TVDb', 'Trakt') */
+  public readonly service: string;
+
+  constructor(service: string, message: string, details?: Record<string, unknown>) {
+    super(ErrorCode.EXTERNAL_SERVICE_ERROR, `[${service}] ${message}`, { service, ...details });
+    this.name = 'ExternalServiceError';
+    this.service = service;
+  }
+}
+
+/**
  * Type guard to check if an error is an AppError
  */
 export function isAppError(error: unknown): error is AppError {

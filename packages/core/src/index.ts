@@ -37,10 +37,20 @@ export {
   RateLimitError,
   InternalError,
   ServiceUnavailableError,
+  ExternalServiceError,
   isAppError,
   toAppError,
 } from './errors.js';
 export type { ErrorCodeType } from './errors.js';
+
+// Retry utilities
+export {
+  withRetry,
+  calculateBackoffDelay,
+  isRetryableError,
+  EXTERNAL_SERVICE_RETRY,
+} from './retry.js';
+export type { RetryConfig, RetryLogger } from './retry.js';
 
 // Utilities
 export {

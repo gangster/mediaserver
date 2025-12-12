@@ -23,6 +23,30 @@ export {
   episodes,
 } from './media.js';
 
+// Genres
+export {
+  genres,
+  movieGenres,
+  showGenres,
+} from './genres.js';
+
+// Credits
+export {
+  people,
+  movieCredits,
+  showCredits,
+} from './credits.js';
+
+// Ratings
+export {
+  contentRatings,
+} from './ratings.js';
+
+// Trailers
+export {
+  trailers,
+} from './trailers.js';
+
 // Playback
 export {
   watchProgress,
@@ -58,7 +82,10 @@ export {
 // Jobs
 export {
   backgroundJobs,
+  jobLogs,
+  queueMetrics,
 } from './jobs.js';
+export type { JobType, JobStatus } from './jobs.js';
 
 // Settings
 export {
@@ -67,4 +94,9 @@ export {
   settings,
   metadataProviders,
 } from './settings.js';
+
+// OAuth
+export {
+  oauthTokens,
+} from './oauth.js';
 

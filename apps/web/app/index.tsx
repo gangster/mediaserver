@@ -36,6 +36,8 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
+const IMAGE_BASE_URL = 'http://localhost:3000/api/images';
+
 /**
  * Convert movie to MediaRowItem
  */
@@ -52,7 +54,8 @@ function movieToRowItem(movie: {
     id: movie.id,
     title: movie.title,
     year: movie.year,
-    posterPath: movie.posterPath,
+    // Use proper image proxy URL with movie ID
+    posterPath: movie.posterPath ? `${IMAGE_BASE_URL}/movies/${movie.id}/poster?size=medium` : null,
     rating: movie.voteAverage,
   };
 }
@@ -73,7 +76,8 @@ function showToRowItem(show: {
     id: show.id,
     title: show.title,
     year: show.year,
-    posterPath: show.posterPath,
+    // Use proper image proxy URL with show ID
+    posterPath: show.posterPath ? `${IMAGE_BASE_URL}/shows/${show.id}/poster?size=medium` : null,
     rating: show.voteAverage,
   };
 }
@@ -230,10 +234,16 @@ export default function WebHomeScreen() {
     [router]
   );
 
-  const handleItemPress = useCallback(
+  const handleMoviePress = useCallback(
     (item: MediaRowItem) => {
-      // Determine type based on context or default to movie
       router.push(`/movies/${item.id}` as '/movies/[id]');
+    },
+    [router]
+  );
+
+  const handleShowPress = useCallback(
+    (item: MediaRowItem) => {
+      router.push(`/tv/${item.id}` as '/tv/[id]');
     },
     [router]
   );
@@ -272,7 +282,12 @@ export default function WebHomeScreen() {
     return <Redirect href="/auth/login" />;
   }
 
-  const hasContent = (moviesData?.total ?? 0) > 0 || (showsData?.total ?? 0) > 0;
+  // Check if we have any content - use both API totals AND actual fetched items
+  const hasContent = 
+    (moviesData?.total ?? 0) > 0 || 
+    (showsData?.total ?? 0) > 0 ||
+    (recentMovies?.length ?? 0) > 0 ||
+    (recentShows?.length ?? 0) > 0;
   const greeting = getGreeting();
   const userName = user?.displayName || user?.email?.split('@')[0] || 'there';
 
@@ -425,7 +440,7 @@ export default function WebHomeScreen() {
                 data={continueWatchingItems}
                 isLoading={continueWatchingLoading}
                 skeletonCount={5}
-                onItemPress={handleItemPress}
+                onItemPress={handleMoviePress}
               />
             )}
 
@@ -438,7 +453,7 @@ export default function WebHomeScreen() {
                 isLoading={recentMoviesLoading}
                 seeAllLink="/movies"
                 skeletonCount={8}
-                onItemPress={handleItemPress}
+                onItemPress={handleMoviePress}
               />
             )}
 
@@ -451,7 +466,7 @@ export default function WebHomeScreen() {
                 isLoading={recentShowsLoading}
                 seeAllLink="/tv"
                 skeletonCount={8}
-                onItemPress={handleItemPress}
+                onItemPress={handleShowPress}
               />
             )}
 

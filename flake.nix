@@ -22,6 +22,9 @@
             # Database
             sqlite
 
+            # Job queue (Redis-compatible)
+            valkey
+
             # Media processing
             ffmpeg
 
@@ -51,14 +54,19 @@
             export NODE_ENV="development"
             export LOG_LEVEL="debug"
 
+            # === Redis/Valkey Configuration ===
+            export REDIS_URL="redis://localhost:6379"
+            export VALKEY_DATA_DIR="$PWD/.valkey"
+
             # === Paths ===
             export DATA_DIR="./data"
             export TRANSCODES_DIR="./transcodes"
             export CACHE_DIR="./cache"
             export LOGS_DIR="./logs"
 
-            # Create data directory if it doesn't exist
+            # Create data directories if they don't exist
             mkdir -p apps/server/data
+            mkdir -p .valkey
 
             # Only show banner once per shell session
             if [ -z "$MEDIASERVER_ENV_LOADED" ]; then
@@ -69,11 +77,14 @@
               echo "Node.js: $(node --version)"
               echo "Yarn:    $(yarn --version 2>/dev/null || echo 'run: corepack enable')"
               echo "Bun:     $(bun --version)"
+              echo "Valkey:  $(valkey-server --version 2>/dev/null | head -1 || echo 'available')"
               echo ""
               echo "Commands:"
-              echo "  yarn install             - Install dependencies"
-              echo "  yarn nx run server:dev   - Start backend server"
-              echo "  yarn nx run web:dev      - Start web frontend"
+              echo "  yarn dev      - Start all services (Valkey + Server + Web)"
+              echo "  yarn stop     - Stop all services"
+              echo "  yarn status   - Check service status"
+              echo "  yarn restart  - Restart all services"
+              echo "  yarn logs     - Tail all logs"
               echo ""
             fi
           '';

@@ -24,7 +24,12 @@ export const providerConfigs = sqliteTable('provider_configs', {
  */
 export const systemProviderDefaults = sqliteTable('system_provider_defaults', {
   id: text('id').primaryKey().default('default'),
-  primaryProvider: text('primary_provider').notNull().default('tmdb'),
+  /** @deprecated Use primaryMovieProvider and primaryTvProvider instead */
+  primaryProvider: text('primary_provider').default('tmdb'),
+  /** Primary metadata provider for movies */
+  primaryMovieProvider: text('primary_movie_provider').notNull().default('tmdb'),
+  /** Primary metadata provider for TV shows */
+  primaryTvProvider: text('primary_tv_provider').notNull().default('tmdb'),
   enabledRatingSources: text('enabled_rating_sources').notNull().default('["imdb", "rt_critics"]'),
   ratingSourceOrder: text('rating_source_order'),
   updatedAt: text('updated_at')
@@ -87,9 +92,9 @@ export const mediaRatings = sqliteTable(
 export const externalIds = sqliteTable(
   'external_ids',
   {
-    mediaType: text('media_type', { enum: ['movie', 'show'] }).notNull(),
+    mediaType: text('media_type', { enum: ['movie', 'show', 'season', 'episode', 'person'] }).notNull(),
     mediaId: text('media_id').notNull(),
-    provider: text('provider', { enum: ['tmdb', 'imdb', 'tvdb', 'trakt'] }).notNull(),
+    provider: text('provider', { enum: ['tmdb', 'imdb', 'tvdb', 'trakt', 'anidb', 'anilist', 'mal'] }).notNull(),
     externalId: text('external_id').notNull(),
     updatedAt: text('updated_at')
       .notNull()

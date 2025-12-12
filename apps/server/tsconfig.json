@@ -5,7 +5,7 @@
     "rootDir": "./src",
     "declaration": true,
     "declarationMap": true,
-    "types": ["bun-types"],
+    "types": ["node"],
     "paths": {}
   },
   "include": ["src/**/*.ts"],

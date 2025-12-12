@@ -4,12 +4,12 @@
  * Sets up providers and navigation for the web application.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Stack, usePathname, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { ApiProvider, useSetupStatus } from '@mediaserver/api-client';
 import { useAuth } from '../src/hooks/useAuth';
-import { getAccessToken } from '../src/stores/auth';
+import { getAccessToken, handleAuthError } from '../src/stores/auth';
 
 import '../global.css';
 
@@ -56,8 +56,15 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function RootLayout() {
+  // Memoize config to prevent unnecessary re-renders
+  const apiConfig = useMemo(() => ({
+    baseUrl: 'http://localhost:3000',
+    getToken: getAccessToken,
+    onAuthError: handleAuthError,
+  }), []);
+
   return (
-    <ApiProvider config={{ baseUrl: 'http://localhost:3000', getToken: getAccessToken }}>
+    <ApiProvider config={apiConfig}>
       <StatusBar style="light" />
       <AuthGuard>
         <Stack

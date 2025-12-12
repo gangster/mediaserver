@@ -97,6 +97,13 @@ export const moviesRouter = router({
       limit: limit + 1, // Fetch one extra to determine if there's a next page
     });
 
+    // Get total count (for stats display)
+    const countResult = await ctx.db
+      .select({ count: sql<number>`count(*)` })
+      .from(movies)
+      .where(conditions.length > 0 ? and(...conditions) : undefined);
+    const total = countResult[0]?.count ?? 0;
+
     // Determine next cursor
     const hasMore = results.length > limit;
     const items = hasMore ? results.slice(0, -1) : results;
@@ -105,6 +112,7 @@ export const moviesRouter = router({
     return {
       items,
       nextCursor,
+      total,
     };
   }),
 
