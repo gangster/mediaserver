@@ -2,6 +2,27 @@
 
 This document provides context and guidance for AI assistants working on the mediaserver project.
 
+---
+
+## 🚨 CRITICAL: Always Use Nix Dev Shell 🚨
+
+**EVERY shell command MUST be run inside the Nix dev shell.** This is non-negotiable.
+
+```bash
+# ✅ CORRECT - Always prefix with nix develop -c
+nix develop -c yarn dev
+nix develop -c yarn nx run web:typecheck
+nix develop -c yarn install
+
+# ❌ WRONG - Never run commands directly
+yarn dev                    # Will fail - missing dependencies
+yarn nx run web:typecheck   # Will fail - missing environment
+```
+
+The Nix flake provides Node.js, Valkey, SQLite, ffmpeg, and all environment variables. Commands run outside the shell WILL fail.
+
+---
+
 ## Project Overview
 
 Mediaserver is a self-hosted media server application (similar to Plex/Jellyfin) built as an Nx monorepo with:
