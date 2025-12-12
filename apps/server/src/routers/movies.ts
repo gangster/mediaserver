@@ -9,7 +9,6 @@ import { moviesListInputSchema, uuidSchema } from '@mediaserver/config';
 import {
   movies,
   watchProgress,
-  libraries,
   libraryPermissions,
   eq,
   and,

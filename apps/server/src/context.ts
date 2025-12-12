@@ -18,7 +18,7 @@ export interface CreateContextOptions {
 }
 
 /** tRPC context type */
-export interface Context {
+export interface Context extends Record<string, unknown> {
   db: Database;
   req: Request;
   env: Env;

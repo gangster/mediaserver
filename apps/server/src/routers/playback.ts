@@ -27,9 +27,6 @@ import {
 /** Threshold percentage for marking as watched */
 const WATCHED_THRESHOLD = 90;
 
-/** Progress update interval in seconds */
-const PROGRESS_UPDATE_INTERVAL = 10;
-
 export const playbackRouter = router({
   /**
    * Get watch progress for a specific item.
@@ -117,7 +114,6 @@ export const playbackRouter = router({
       const { mediaType, mediaId, profile = 'original', startPosition = 0 } = input;
 
       // Verify media exists and get file info
-      let filePath: string;
       let directPlayable: boolean | null;
 
       if (mediaType === 'movie') {
@@ -132,7 +128,6 @@ export const playbackRouter = router({
           });
         }
 
-        filePath = movie.filePath;
         directPlayable = movie.directPlayable;
       } else {
         const episode = await ctx.db.query.episodes.findFirst({
@@ -146,7 +141,6 @@ export const playbackRouter = router({
           });
         }
 
-        filePath = episode.filePath;
         directPlayable = episode.directPlayable;
       }
 

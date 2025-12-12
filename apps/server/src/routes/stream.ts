@@ -58,16 +58,17 @@ streamRouter.get('/:sessionId/:quality/playlist.m3u8', async (c) => {
 
   // TODO: Implement quality playlist generation
   // 1. Validate session
-  // 2. Generate playlist with segment list
+  // 2. Generate playlist with segment list based on quality
 
   return c.text(`#EXTM3U
 #EXT-X-VERSION:3
 #EXT-X-TARGETDURATION:10
 #EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-PLAYLIST-TYPE:VOD
 #EXTINF:10.0,
-/api/stream/${sessionId}/segment/0.ts
+/api/stream/${sessionId}/${quality}/segment/0.ts
 #EXTINF:10.0,
-/api/stream/${sessionId}/segment/1.ts
+/api/stream/${sessionId}/${quality}/segment/1.ts
 #EXT-X-ENDLIST
 `, 200, {
     'Content-Type': 'application/vnd.apple.mpegurl',

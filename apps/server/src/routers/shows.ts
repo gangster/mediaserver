@@ -4,7 +4,7 @@
 
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { router, protectedProcedure, adminProcedure } from './trpc.js';
+import { router, protectedProcedure } from './trpc.js';
 import { showsListInputSchema, uuidSchema } from '@mediaserver/config';
 import {
   tvShows,
@@ -18,7 +18,6 @@ import {
   asc,
   like,
   sql,
-  count,
 } from '@mediaserver/db';
 
 export const showsRouter = router({

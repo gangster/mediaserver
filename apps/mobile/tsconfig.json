@@ -4,17 +4,15 @@
     "strict": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@mediaserver/core": ["../../packages/core/src/index.ts"],
-      "@mediaserver/ui": ["../../packages/ui/src/index.ts"],
-      "@mediaserver/api-client": ["../../packages/api-client/src/index.ts"]
+      "@/*": ["src/*"]
     }
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
     ".expo/types/**/*.ts",
-    "expo-env.d.ts"
+    "expo-env.d.ts",
+    "nativewind-env.d.ts"
   ]
 }
 

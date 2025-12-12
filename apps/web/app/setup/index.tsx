@@ -20,7 +20,6 @@ import {
   useSetupStatus,
   useCreateOwner,
   useSetupAddLibrary,
-  useSaveMetadataProviders,
   useSavePrivacySettings,
   useCompleteSetup,
   useLibraryUtils,
@@ -180,7 +179,6 @@ export default function SetupWizard() {
   const { data: status, isLoading: statusLoading } = useSetupStatus();
   const createOwner = useCreateOwner();
   const addLibrary = useSetupAddLibrary();
-  const saveProviders = useSaveMetadataProviders();
   const savePrivacy = useSavePrivacySettings();
   const completeSetup = useCompleteSetup();
   const createPath = useCreatePath();
@@ -271,7 +269,6 @@ export default function SetupWizard() {
     }));
 
     try {
-      // @ts-expect-error - Router not yet typed
       const result = await libraryUtils.libraries.checkPath.fetch({ path: pathToCheck });
       setPathValidation((prev) => ({
         ...prev,
@@ -350,6 +347,7 @@ export default function SetupWizard() {
       }, 100);
       return () => clearTimeout(timer);
     }
+    return undefined;
   }, [step, initialValidationDone, libraryTypeData, validatePath]);
 
   /** Handle account creation */

@@ -259,7 +259,6 @@ export const setupRouter = router({
 
       // Create library
       const libraryId = generateId();
-      const now = new Date().toISOString();
 
       await ctx.db.insert(libraries).values({
         id: libraryId,
@@ -323,11 +322,12 @@ export const setupRouter = router({
           .where(eq(metadataProviders.id, provider.id))
           .limit(1);
 
-        if (existing.length > 0) {
+        const existingProvider = existing[0];
+        if (existingProvider) {
           await ctx.db
             .update(metadataProviders)
             .set({
-              apiKey: provider.apiKey || existing[0].apiKey,
+              apiKey: provider.apiKey || existingProvider.apiKey,
               enabled: provider.enabled,
               updatedAt: now,
             })

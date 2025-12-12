@@ -2,7 +2,6 @@
  * Settings router - admin and user settings.
  */
 
-import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { router, protectedProcedure, adminProcedure, ownerProcedure } from './trpc.js';
 import { updatePrivacySettingsInputSchema, updateProviderConfigInputSchema } from '@mediaserver/config';
@@ -14,7 +13,6 @@ import {
   systemProviderDefaults,
   settings,
   eq,
-  sql,
 } from '@mediaserver/db';
 
 export const settingsRouter = router({
@@ -271,9 +269,7 @@ export const settingsRouter = router({
           })
           .where(eq(settings.key, input.key));
       } else {
-        const { generateId } = await import('@mediaserver/core');
         await ctx.db.insert(settings).values({
-          id: generateId(),
           key: input.key,
           value: input.value,
         });

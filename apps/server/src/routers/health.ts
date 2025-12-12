@@ -18,7 +18,7 @@ export const healthRouter = router({
   /**
    * Detailed health check with component status.
    */
-  detailed: publicProcedure.query(async ({ ctx }) => {
+  detailed: publicProcedure.query(async ({ ctx: _ctx }) => {
     const checks: Record<string, boolean> = {};
 
     // Check database

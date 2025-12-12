@@ -19,7 +19,7 @@ import {
 } from '@mediaserver/db';
 
 /** Search result types */
-interface MovieSearchResult {
+export interface MovieSearchResult {
   type: 'movie';
   id: string;
   title: string;
@@ -30,7 +30,7 @@ interface MovieSearchResult {
   voteAverage: number | null;
 }
 
-interface ShowSearchResult {
+export interface ShowSearchResult {
   type: 'tvshow';
   id: string;
   title: string;
@@ -43,7 +43,7 @@ interface ShowSearchResult {
   episodeCount: number;
 }
 
-interface EpisodeSearchResult {
+export interface EpisodeSearchResult {
   type: 'episode';
   id: string;
   title: string | null;
@@ -55,7 +55,7 @@ interface EpisodeSearchResult {
   overview: string | null;
 }
 
-type SearchResult = MovieSearchResult | ShowSearchResult | EpisodeSearchResult;
+export type SearchResult = MovieSearchResult | ShowSearchResult | EpisodeSearchResult;
 
 export const searchRouter = router({
   /**
