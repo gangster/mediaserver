@@ -168,16 +168,16 @@ export function WebHeroBanner({
           />
         )}
 
-        {/* Bottom gradient overlay - fades to page background (#09090b = zinc-950) */}
+        {/* Bottom gradient overlay - fades to page background (#18181b = zinc-900) */}
         <View
           style={{
             position: 'absolute',
             bottom: 0,
             left: 0,
             right: 0,
-            height: '60%',
+            height: '70%',
             // @ts-expect-error - web-only gradient
-            background: 'linear-gradient(to top, #18181b 0%, #18181b 5%, rgba(24, 24, 27, 0.9) 20%, rgba(24, 24, 27, 0.6) 40%, transparent 100%)',
+            background: 'linear-gradient(to top, #18181b 0%, #18181b 10%, rgba(24, 24, 27, 0.95) 25%, rgba(24, 24, 27, 0.7) 50%, transparent 100%)',
           }}
         />
 
@@ -190,7 +190,7 @@ export function WebHeroBanner({
             bottom: 0,
             width: '70%',
             // @ts-expect-error - web-only gradient
-            background: 'linear-gradient(to right, rgba(9, 9, 11, 0.85) 0%, rgba(9, 9, 11, 0.5) 40%, transparent 100%)',
+            background: 'linear-gradient(to right, rgba(24, 24, 27, 0.9) 0%, rgba(24, 24, 27, 0.6) 40%, transparent 100%)',
           }}
         />
       </View>
@@ -352,7 +352,7 @@ export function WebHeroBannerSkeleton({
   }
 
   return (
-    <View style={{ position: 'relative', height: bannerHeight, backgroundColor: '#09090b' }}>
+    <View style={{ position: 'relative', height: bannerHeight, backgroundColor: '#18181b' }}>
       {/* Gradient overlay */}
       <View
         style={{
@@ -362,7 +362,7 @@ export function WebHeroBannerSkeleton({
           right: 0,
           bottom: 0,
           // @ts-expect-error - web-only gradient
-          background: 'linear-gradient(to top, #18181b 0%, rgba(39, 39, 42, 0.5) 50%, #27272a 100%)',
+          background: 'linear-gradient(to top, #18181b 0%, rgba(39, 39, 42, 0.7) 50%, #27272a 100%)',
         }}
       />
 
