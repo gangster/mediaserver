@@ -2,7 +2,7 @@
  * Auth hook for components
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuthStore } from '../stores/auth';
 
 /**
@@ -21,13 +21,23 @@ export function useAuth() {
     clearError,
     initialize,
   } = useAuthStore();
+  
+  const [hydrated, setHydrated] = useState(false);
 
-  // Initialize auth on mount
+  // Hydrate store on client side
   useEffect(() => {
-    if (!isInitialized) {
+    if (typeof window !== 'undefined') {
+      useAuthStore.persist.rehydrate();
+      setHydrated(true);
+    }
+  }, []);
+
+  // Initialize auth after hydration
+  useEffect(() => {
+    if (hydrated && !isInitialized) {
       initialize();
     }
-  }, [isInitialized, initialize]);
+  }, [hydrated, isInitialized, initialize]);
 
   return {
     user,

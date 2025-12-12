@@ -172,11 +172,22 @@ export const useAuthStore = create<AuthStore>()(
     }),
     {
       name: 'mediaserver-auth',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => {
+        // SSR-safe localStorage access
+        if (typeof window === 'undefined') {
+          return {
+            getItem: () => null,
+            setItem: () => {},
+            removeItem: () => {},
+          };
+        }
+        return localStorage;
+      }),
       partialize: (state) => ({
         tokens: state.tokens,
         user: state.user,
       }),
+      skipHydration: true, // Don't hydrate on server
     }
   )
 );

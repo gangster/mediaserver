@@ -103,7 +103,14 @@ export default function Register() {
           )}
 
           {/* Register form */}
-          <View className="gap-5">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              console.log('Register form submitted');
+              handleSubmit(onSubmit)();
+            }}
+            className="flex flex-col gap-5"
+          >
             {/* Display Name field */}
             <View>
               <Text className="text-sm font-medium text-zinc-300 mb-2">Display Name</Text>
@@ -243,7 +250,10 @@ export default function Register() {
 
             {/* Submit button */}
             <Pressable
-              onPress={handleSubmit(onSubmit)}
+              onPress={() => {
+                console.log('Create account button pressed');
+                handleSubmit(onSubmit)();
+              }}
               disabled={isLoading}
               className={`w-full py-3 px-4 rounded-lg flex-row items-center justify-center gap-2 ${
                 isLoading
@@ -260,7 +270,7 @@ export default function Register() {
                 <Text className="text-white font-medium">Create account</Text>
               )}
             </Pressable>
-          </View>
+          </form>
 
           {/* Login link */}
           <View className="mt-8 flex-row justify-center">

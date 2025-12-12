@@ -58,12 +58,7 @@ app.use(
   trpcServer({
     router: appRouter,
     endpoint: '/api',
-    createContext: ({ req }) =>
-      createContext({
-        db,
-        req,
-        env,
-      }),
+    createContext: ({ req }) => createContext({ db, req, env }),
   })
 );
 

@@ -5,7 +5,7 @@
  */
 
 import { useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -185,20 +185,14 @@ export default function Login() {
             <Pressable
               onPress={handleSubmit(onSubmit)}
               disabled={isLoading}
-              className={`w-full py-3 px-4 rounded-lg flex-row items-center justify-center gap-2 ${
-                isLoading
-                  ? 'bg-indigo-600/50'
-                  : 'bg-indigo-600 active:bg-indigo-500'
-              }`}
+              accessibilityRole="button"
+              accessibilityLabel="Sign in"
+              className="w-full py-3 px-4 rounded-lg bg-indigo-600 active:bg-indigo-500 flex-row items-center justify-center"
+              style={{ opacity: isLoading ? 0.5 : 1 }}
             >
-              {isLoading ? (
-                <>
-                  <ActivityIndicator size="small" color="white" />
-                  <Text className="text-white font-medium">Signing in...</Text>
-                </>
-              ) : (
-                <Text className="text-white font-medium">Sign in</Text>
-              )}
+              <Text className="text-white font-medium">
+                {isLoading ? 'Signing in...' : 'Sign in'}
+              </Text>
             </Pressable>
           </View>
 

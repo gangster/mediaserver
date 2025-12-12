@@ -75,11 +75,18 @@ async function authRequest<T>(
   const data = await res.json();
 
   if (!res.ok || data.error) {
-    throw new AuthApiError(
-      data.error?.message || data.error?.data?.message || 'Request failed',
-      data.error?.data?.code || data.error?.code || 'UNKNOWN_ERROR',
-      res.status
-    );
+    // tRPC with superjson can wrap errors in different structures
+    const errorMessage = 
+      data.error?.json?.message ||  // superjson wrapped
+      data.error?.message || 
+      data.error?.data?.message || 
+      'Request failed';
+    const errorCode = 
+      data.error?.json?.data?.code ||
+      data.error?.data?.code || 
+      data.error?.code || 
+      'UNKNOWN_ERROR';
+    throw new AuthApiError(errorMessage, errorCode, res.status);
   }
 
   return data.result?.data?.json as T;

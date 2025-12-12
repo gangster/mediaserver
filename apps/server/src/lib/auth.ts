@@ -2,9 +2,10 @@
  * Authentication utilities.
  *
  * Handles JWT token creation and verification, password hashing.
+ * Uses native crypto module to avoid third-party JWT library issues with Bun.
  */
 
-import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
+import { createHmac, createHash } from 'crypto';
 import { hash, verify } from '@node-rs/argon2';
 import type { UserRole, AccessTokenPayload, RefreshTokenPayload } from '@mediaserver/core';
 import { generateId } from '@mediaserver/core';
@@ -17,11 +18,100 @@ const ARGON2_OPTIONS = {
   outputLen: 32,
 };
 
-/** Access token expiry (15 minutes) */
-const ACCESS_TOKEN_EXPIRY = '15m';
+/** Access token expiry in seconds (15 minutes) */
+const ACCESS_TOKEN_EXPIRY_SECONDS = 15 * 60;
 
-/** Refresh token expiry (7 days) */
-const REFRESH_TOKEN_EXPIRY = '7d';
+/** Refresh token expiry in seconds (7 days) */
+const REFRESH_TOKEN_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
+
+// ============================================================================
+// Custom JWT Implementation using Node's native crypto
+// ============================================================================
+
+/**
+ * Base64url encode a string or buffer.
+ */
+function base64urlEncode(input: string | Buffer): string {
+  const base64 = Buffer.from(input).toString('base64');
+  return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/**
+ * Base64url decode to a string.
+ */
+function base64urlDecode(input: string): string {
+  // Restore standard base64
+  let base64 = input.replace(/-/g, '+').replace(/_/g, '/');
+  // Add padding if needed
+  const padding = base64.length % 4;
+  if (padding) {
+    base64 += '='.repeat(4 - padding);
+  }
+  return Buffer.from(base64, 'base64').toString('utf8');
+}
+
+/**
+ * JWT header for HS256 algorithm.
+ */
+const JWT_HEADER = base64urlEncode(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+
+/**
+ * Signs a JWT payload with HMAC-SHA256.
+ */
+function signJwt(payload: Record<string, unknown>, secret: string): string {
+  const encodedPayload = base64urlEncode(JSON.stringify(payload));
+  const data = `${JWT_HEADER}.${encodedPayload}`;
+  const signature = createHmac('sha256', secret).update(data).digest();
+  return `${data}.${base64urlEncode(signature)}`;
+}
+
+/**
+ * Verifies and decodes a JWT.
+ * Returns the payload if valid, null otherwise.
+ */
+function verifyJwt<T extends Record<string, unknown>>(
+  token: string,
+  secret: string
+): T | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const header = parts[0]!;
+  const payload = parts[1]!;
+  const signature = parts[2]!;
+
+  // Verify signature
+  const data = `${header}.${payload}`;
+  const expectedSignature = base64urlEncode(
+    createHmac('sha256', secret).update(data).digest()
+  );
+
+  if (signature !== expectedSignature) {
+    return null;
+  }
+
+  // Decode and parse payload
+  try {
+    const decoded = JSON.parse(base64urlDecode(payload)) as T;
+
+    // Check expiration
+    if (decoded.exp && typeof decoded.exp === 'number') {
+      if (Date.now() >= decoded.exp * 1000) {
+        return null; // Token expired
+      }
+    }
+
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// Password Hashing
+// ============================================================================
 
 /**
  * Hashes a password using Argon2id.
@@ -41,98 +131,117 @@ export async function verifyPassword(hashedPassword: string, password: string): 
   }
 }
 
+// ============================================================================
+// Token Creation
+// ============================================================================
+
 /**
  * Creates an access token JWT.
  */
-export async function createAccessToken(
+export function createAccessToken(
   userId: string,
   role: UserRole,
   secret: string
-): Promise<{ token: string; expiresAt: Date }> {
-  const secretKey = new TextEncoder().encode(secret);
+): { token: string; expiresAt: Date } {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + ACCESS_TOKEN_EXPIRY_SECONDS;
+  const expiresAt = new Date(exp * 1000);
 
-  const expiresAt = new Date();
-  expiresAt.setMinutes(expiresAt.getMinutes() + 15);
+  const payload = {
+    sub: userId,
+    role,
+    iat: now,
+    exp,
+  };
 
-  const token = await new SignJWT({ role } as JWTPayload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject(userId)
-    .setIssuedAt()
-    .setExpirationTime(ACCESS_TOKEN_EXPIRY)
-    .sign(secretKey);
-
+  const token = signJwt(payload, secret);
   return { token, expiresAt };
 }
 
 /**
  * Creates a refresh token JWT.
  */
-export async function createRefreshToken(
+export function createRefreshToken(
   userId: string,
   familyId: string,
   secret: string
-): Promise<{ token: string; expiresAt: Date; tokenHash: string }> {
-  const secretKey = new TextEncoder().encode(secret);
+): { token: string; expiresAt: Date; tokenHash: string } {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + REFRESH_TOKEN_EXPIRY_SECONDS;
+  const expiresAt = new Date(exp * 1000);
 
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 7);
+  const payload = {
+    sub: userId,
+    family: familyId,
+    iat: now,
+    exp,
+  };
 
-  const token = await new SignJWT({ family: familyId } as JWTPayload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .setSubject(userId)
-    .setIssuedAt()
-    .setExpirationTime(REFRESH_TOKEN_EXPIRY)
-    .sign(secretKey);
-
-  // Hash the token for storage
-  const tokenHash = await hashToken(token);
+  const token = signJwt(payload, secret);
+  const tokenHash = hashTokenSync(token);
 
   return { token, expiresAt, tokenHash };
 }
 
+// ============================================================================
+// Token Verification
+// ============================================================================
+
 /**
  * Verifies an access token and returns the payload.
  */
-export async function verifyAccessToken(
+export function verifyAccessToken(
   token: string,
   secret: string
-): Promise<AccessTokenPayload | null> {
-  try {
-    const secretKey = new TextEncoder().encode(secret);
-    const { payload } = await jwtVerify(token, secretKey);
+): AccessTokenPayload | null {
+  const payload = verifyJwt<{
+    sub: string;
+    role: UserRole;
+    iat: number;
+    exp: number;
+  }>(token, secret);
 
-    return {
-      sub: payload.sub as string,
-      role: payload['role'] as UserRole,
-      iat: payload.iat as number,
-      exp: payload.exp as number,
-    };
-  } catch {
+  if (!payload) {
     return null;
   }
+
+  return {
+    sub: payload.sub,
+    role: payload.role,
+    iat: payload.iat,
+    exp: payload.exp,
+  };
 }
 
 /**
  * Verifies a refresh token and returns the payload.
  */
-export async function verifyRefreshToken(
+export function verifyRefreshToken(
   token: string,
   secret: string
-): Promise<RefreshTokenPayload | null> {
-  try {
-    const secretKey = new TextEncoder().encode(secret);
-    const { payload } = await jwtVerify(token, secretKey);
+): RefreshTokenPayload | null {
+  const payload = verifyJwt<{
+    sub: string;
+    family: string;
+    iat: number;
+    exp: number;
+  }>(token, secret);
 
-    return {
-      sub: payload.sub as string,
-      family: payload['family'] as string,
-      iat: payload.iat as number,
-      exp: payload.exp as number,
-    };
-  } catch {
+  if (!payload) {
     return null;
   }
+
+  return {
+    sub: payload.sub,
+    family: payload.family,
+    iat: payload.iat,
+    exp: payload.exp,
+  };
 }
+
+// ============================================================================
+// Token Utilities
+// ============================================================================
 
 /**
  * Creates a new token family ID for refresh token rotation.
@@ -142,21 +251,17 @@ export function createTokenFamily(): string {
 }
 
 /**
- * Hashes a token for secure storage.
+ * Hashes a token synchronously using SHA-256.
  */
-async function hashToken(token: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(token);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+function hashTokenSync(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 /**
  * Compares a token with a stored hash.
  */
-export async function compareTokenHash(token: string, storedHash: string): Promise<boolean> {
-  const hash = await hashToken(token);
+export function compareTokenHash(token: string, storedHash: string): boolean {
+  const hash = hashTokenSync(token);
   return hash === storedHash;
 }
 

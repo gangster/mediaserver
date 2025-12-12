@@ -53,11 +53,14 @@ export const authRouter = router({
       });
     }
 
-    // Create tokens
-    const { token: accessToken, expiresAt } = await createAccessToken(
+    // Create tokens - access process.env directly to work around Bun context issues
+    const jwtSecret = process.env['JWT_SECRET']!;
+    const jwtRefreshSecret = process.env['JWT_REFRESH_SECRET']!;
+    
+    const { token: accessToken, expiresAt } = createAccessToken(
       user.id,
       user.role,
-      ctx.env.JWT_SECRET
+      jwtSecret
     );
 
     const familyId = createTokenFamily();
@@ -65,7 +68,7 @@ export const authRouter = router({
       token: refreshToken,
       expiresAt: refreshExpiresAt,
       tokenHash,
-    } = await createRefreshToken(user.id, familyId, ctx.env.JWT_REFRESH_SECRET);
+    } = createRefreshToken(user.id, familyId, jwtRefreshSecret);
 
     // Store refresh token
     await ctx.db.insert(refreshTokens).values({
@@ -146,10 +149,10 @@ export const authRouter = router({
     });
 
     // Create tokens
-    const { token: accessToken, expiresAt } = await createAccessToken(
+    const { token: accessToken, expiresAt } = createAccessToken(
       userId,
       role,
-      ctx.env.JWT_SECRET
+      process.env['JWT_SECRET']!
     );
 
     const familyId = createTokenFamily();
@@ -157,7 +160,7 @@ export const authRouter = router({
       token: refreshToken,
       expiresAt: refreshExpiresAt,
       tokenHash,
-    } = await createRefreshToken(userId, familyId, ctx.env.JWT_REFRESH_SECRET);
+    } = createRefreshToken(userId, familyId, process.env['JWT_REFRESH_SECRET']!);
 
     // Store refresh token
     await ctx.db.insert(refreshTokens).values({
@@ -189,7 +192,7 @@ export const authRouter = router({
     const { refreshToken } = input;
 
     // Verify refresh token
-    const payload = await verifyRefreshToken(refreshToken, ctx.env.JWT_REFRESH_SECRET);
+    const payload = verifyRefreshToken(refreshToken, process.env['JWT_REFRESH_SECRET']!);
     if (!payload) {
       throw new TRPCError({
         code: 'UNAUTHORIZED',
@@ -217,7 +220,7 @@ export const authRouter = router({
     }
 
     // Verify token hash
-    const hashMatches = await compareTokenHash(refreshToken, storedToken.tokenHash);
+    const hashMatches = compareTokenHash(refreshToken, storedToken.tokenHash);
     if (!hashMatches) {
       throw new TRPCError({
         code: 'UNAUTHORIZED',
@@ -238,17 +241,17 @@ export const authRouter = router({
     }
 
     // Create new tokens (rotation)
-    const { token: newAccessToken, expiresAt } = await createAccessToken(
+    const { token: newAccessToken, expiresAt } = createAccessToken(
       user.id,
       user.role,
-      ctx.env.JWT_SECRET
+      process.env['JWT_SECRET']!
     );
 
     const {
       token: newRefreshToken,
       expiresAt: refreshExpiresAt,
       tokenHash,
-    } = await createRefreshToken(user.id, payload.family, ctx.env.JWT_REFRESH_SECRET);
+    } = createRefreshToken(user.id, payload.family, process.env['JWT_REFRESH_SECRET']!);
 
     // Mark old token as rotated and store new one
     await ctx.db

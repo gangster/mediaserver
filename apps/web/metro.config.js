@@ -25,6 +25,33 @@ config.resolver.unstable_enablePackageExports = true;
 
 // Resolve workspace packages from source
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Force zustand to use CommonJS versions to avoid import.meta issues
+  // zustand's ESM files use import.meta.env which doesn't work in Metro for web
+  if (moduleName === 'zustand') {
+    return {
+      filePath: path.resolve(projectRoot, 'node_modules/zustand/index.js'),
+      type: 'sourceFile',
+    };
+  }
+  if (moduleName === 'zustand/vanilla') {
+    return {
+      filePath: path.resolve(projectRoot, 'node_modules/zustand/vanilla.js'),
+      type: 'sourceFile',
+    };
+  }
+  if (moduleName === 'zustand/middleware') {
+    return {
+      filePath: path.resolve(projectRoot, 'node_modules/zustand/middleware.js'),
+      type: 'sourceFile',
+    };
+  }
+  if (moduleName === 'zustand/shallow') {
+    return {
+      filePath: path.resolve(projectRoot, 'node_modules/zustand/shallow.js'),
+      type: 'sourceFile',
+    };
+  }
+
   // Check if it's one of our workspace packages
   if (moduleName.startsWith('@mediaserver/')) {
     const packageName = moduleName.replace('@mediaserver/', '');

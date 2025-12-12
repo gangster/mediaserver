@@ -21,8 +21,8 @@ export default function AuthLayout() {
     }
   }, [isAuthenticated, isInitialized, router]);
 
-  // Show loading while checking auth
-  if (!isInitialized) {
+  // If authenticated and initialized, show loading while redirecting
+  if (isInitialized && isAuthenticated) {
     return (
       <View className="flex-1 items-center justify-center bg-zinc-950">
         <ActivityIndicator size="large" color="#6366f1" />
@@ -30,15 +30,8 @@ export default function AuthLayout() {
     );
   }
 
-  // Don't render auth pages if authenticated
-  if (isAuthenticated) {
-    return (
-      <View className="flex-1 items-center justify-center bg-zinc-950">
-        <ActivityIndicator size="large" color="#6366f1" />
-      </View>
-    );
-  }
-
+  // For public auth routes, don't block on initialization
+  // Show the forms immediately - they're public anyway
   return (
     <Stack
       screenOptions={{
