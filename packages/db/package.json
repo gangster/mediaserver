@@ -13,8 +13,13 @@
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
-    }
+    },
+    "./drizzle": "./drizzle"
   },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.lib.json",
     "dev": "tsc -p tsconfig.lib.json --watch",

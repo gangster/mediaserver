@@ -33,6 +33,28 @@ The project replicates features from the `forreel` project at `/Users/josh/play/
 - **Yarn 3.8.0** with PnP disabled (uses `node_modules`)
 - Always use `yarn` not `npm`
 
+### Nix Development Environment
+This project uses a Nix flake to manage development dependencies. **Always execute commands within the Nix flake environment.**
+
+**Required:** Prefix all shell commands with `nix develop --command` or enter the shell first:
+```bash
+# Option 1: Prefix individual commands
+nix develop --command yarn install
+nix develop --command yarn nx run web:start
+
+# Option 2: Enter the shell for multiple commands
+nix develop
+yarn install
+yarn nx run web:start
+```
+
+The flake provides:
+- Node.js 20, Bun, and Yarn (via corepack)
+- SQLite and ffmpeg
+- Required environment variables (`DATABASE_URL`, `JWT_SECRET`, etc.)
+
+**⚠️ Important:** Running commands outside the Nix flake will fail due to missing environment variables and potentially missing dependencies.
+
 ## Critical NativeWind/React Native Web Gotchas
 
 ### 1. Responsive Classes Don't Work
@@ -147,30 +169,31 @@ Always use React Native components, not HTML elements.
 
 ### Running the Dev Server
 ```bash
-# Start web app
-cd apps/web && npx expo start --web --port 8081
+# Start web app (from within nix develop shell)
+nix develop --command yarn nx run web:start
 
-# Or use nx
+# Or enter the shell first
+nix develop
 yarn nx run web:start
 
 # Clear cache if styles aren't updating
-npx expo start --web --port 8081 --clear
+nix develop --command bash -c "cd apps/web && npx expo start --web --port 8081 --clear"
 ```
 
 ### Running Tasks
-Always use Nx for running tasks:
+Always use Nx for running tasks (within Nix shell):
 ```bash
-yarn nx run web:typecheck
-yarn nx run web:lint
-yarn nx run-many -t typecheck
-yarn nx run-many -t lint
+nix develop --command yarn nx run web:typecheck
+nix develop --command yarn nx run web:lint
+nix develop --command yarn nx run-many -t typecheck
+nix develop --command yarn nx run-many -t lint
 ```
 
 ### Database
 ```bash
-yarn db:migrate    # Run migrations
-yarn db:generate   # Generate types from schema
-yarn db:studio     # Open Drizzle Studio
+nix develop --command yarn db:migrate    # Run migrations
+nix develop --command yarn db:generate   # Generate types from schema
+nix develop --command yarn db:studio     # Open Drizzle Studio
 ```
 
 ### Killing Stuck Processes
@@ -325,6 +348,40 @@ export const usePreferencesStore = create<PreferencesState>()(
 );
 ```
 
+### Cache Updates Before Navigation (tRPC/TanStack Query)
+When navigating after a mutation that changes data used by route guards (like `AuthGuard`), **don't rely on `invalidate()` alone** - it's async and won't complete before navigation.
+
+**❌ Don't do this:**
+```tsx
+return trpc.setup.complete.useMutation({
+  onSuccess: () => {
+    utils.setup.status.invalidate(); // Async! Won't complete in time
+  },
+});
+// Then immediately: router.replace('/libraries')
+// AuthGuard still sees stale data → redirects back!
+```
+
+**✅ Do this instead:**
+```tsx
+return trpc.setup.complete.useMutation({
+  onSuccess: () => {
+    // Optimistically update cache synchronously
+    const currentData = utils.setup.status.getData();
+    if (currentData) {
+      utils.setup.status.setData(undefined, {
+        ...currentData,
+        isComplete: true,
+      });
+    }
+    // Also invalidate for fresh data on next fetch
+    utils.setup.status.invalidate();
+  },
+});
+```
+
+This ensures route guards see the updated state immediately before navigation occurs.
+
 ## Reference Project
 
 When implementing features, reference the forreel project at `/Users/josh/play/forreel`. Key differences:
@@ -336,7 +393,7 @@ When implementing features, reference the forreel project at `/Users/josh/play/f
 
 ### Styles Not Updating
 1. Kill expo: `pkill -f "expo start"`
-2. Clear cache: `npx expo start --web --port 8081 --clear`
+2. Clear cache: `nix develop --command bash -c "cd apps/web && npx expo start --web --port 8081 --clear"`
 
 ### Module Resolution Errors
 If packages from workspace aren't resolving, add them as direct dependencies in `apps/web/package.json`.

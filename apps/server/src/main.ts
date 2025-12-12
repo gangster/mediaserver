@@ -10,7 +10,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { trpcServer } from '@hono/trpc-server';
 import { loadEnv } from '@mediaserver/config';
-import { createDatabaseFromEnv } from '@mediaserver/db';
+import { createDatabaseFromEnv, runMigrationsFromEnv } from '@mediaserver/db';
 import { appRouter } from './routers/app.js';
 import { createContext } from './context.js';
 import { healthRouter } from './routes/health.js';
@@ -22,6 +22,9 @@ const env = loadEnv();
 
 // Create logger
 const log = createLogger(env.LOG_LEVEL);
+
+// Run migrations before creating database connection
+await runMigrationsFromEnv();
 
 // Create database connection
 const db = createDatabaseFromEnv();

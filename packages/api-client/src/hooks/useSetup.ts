@@ -71,6 +71,15 @@ export function useSavePrivacySettings() {
   return trpc.setup.savePrivacySettings.useMutation();
 }
 
+/** Setup status response type */
+interface SetupStatus {
+  isComplete: boolean;
+  currentStep: number;
+  hasOwner: boolean;
+  hasLibrary: boolean;
+  hasMetadataProvider: boolean;
+}
+
 /**
  * Hook to complete setup.
  */
@@ -79,6 +88,16 @@ export function useCompleteSetup() {
 
   return trpc.setup.complete.useMutation({
     onSuccess: () => {
+      // Optimistically update the cache immediately so AuthGuard sees the new state
+      // before navigation occurs (invalidate() is async and won't complete in time)
+      const currentData = utils.setup.status.getData();
+      if (currentData) {
+        utils.setup.status.setData(undefined, {
+          ...currentData,
+          isComplete: true,
+        } as SetupStatus);
+      }
+      // Also invalidate to ensure we get fresh data on next fetch
       utils.setup.status.invalidate();
     },
   });

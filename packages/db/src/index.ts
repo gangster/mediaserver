@@ -12,6 +12,9 @@ export {
 } from './client.js';
 export type { Database, DatabaseOptions, Schema, Client } from './client.js';
 
+// Migrations
+export { runMigrations, runMigrationsFromEnv } from './migrate.js';
+
 // Schema - export all tables
 export * from './schema/index.js';
 

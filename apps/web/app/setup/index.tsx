@@ -11,7 +11,7 @@
  * Matches the behavior of the original Forreel setup wizard.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -25,6 +25,7 @@ import {
   useLibraryUtils,
   useCreatePath,
 } from '@mediaserver/api-client';
+import { useAuth } from '../../src/hooks/useAuth';
 
 /** Wizard step type */
 type Step = 'welcome' | 'account' | 'library' | 'privacy' | 'ready';
@@ -183,6 +184,9 @@ export default function SetupWizard() {
   const completeSetup = useCompleteSetup();
   const createPath = useCreatePath();
   const libraryUtils = useLibraryUtils();
+  
+  // Auth hook for login after account creation
+  const { login } = useAuth();
 
   // Current library data
   const currentLibraryData = libraryTypeData[selectedLibraryType];
@@ -216,9 +220,10 @@ export default function SetupWizard() {
     // Mark initial sync as done
     setInitialSyncDone(true);
 
-    // If setup is complete, redirect to home
-    if (status.isComplete) {
-      router.replace('/');
+    // If setup is complete and we're not on the 'ready' step (about to finish),
+    // redirect to libraries - user shouldn't be on setup page
+    if (status.isComplete && step !== 'ready') {
+      router.replace('/libraries');
       return;
     }
 
@@ -231,12 +236,8 @@ export default function SetupWizard() {
     }
   }, [status, statusLoading, step, initialSyncDone]);
   
-  // Separate effect to handle redirect when setup is complete (can happen anytime)
-  useEffect(() => {
-    if (status?.isComplete) {
-      router.replace('/');
-    }
-  }, [status?.isComplete]);
+  // Note: We intentionally don't redirect when status.isComplete changes after initial load
+  // because handleFinish() handles the redirect to /libraries explicitly
 
   /** Update library data for the selected type */
   const updateCurrentLibraryData = (updates: Partial<LibraryTypeData>) => {
@@ -370,11 +371,16 @@ export default function SetupWizard() {
     }
 
     try {
+      // Create owner account
       await createOwner.mutateAsync({
         email,
         password,
         displayName: displayName || 'Admin',
       });
+
+      // Login with the credentials we just created
+      await login(email, password);
+
       setAccountEmail(email);
       markSetupInProgress();
       setStep('library');
@@ -435,7 +441,9 @@ export default function SetupWizard() {
       // Continue anyway
     }
     clearSetupInProgress();
-    router.replace('/');
+    
+    // Direct to libraries page so user can set up their media
+    router.replace('/libraries');
   };
 
   if (statusLoading) {
