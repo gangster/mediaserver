@@ -45,6 +45,11 @@ body {
   .p-safe {
     padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
   }
+  
+  /* Combined safe area + value utilities */
+  .safe-area-pb {
+    padding-bottom: calc(var(--safe-bottom) + 1rem);
+  }
 
   /* Touch target minimum size (44x44px per Apple HIG) */
   .touch-target {
