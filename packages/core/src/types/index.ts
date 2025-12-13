@@ -12,4 +12,5 @@ export * from './playback.js';
 export * from './provider.js';
 export * from './privacy.js';
 export * from './common.js';
+export * from './transcoding.js';
 

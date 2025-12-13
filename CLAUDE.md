@@ -59,6 +59,82 @@ The project replicates features from the `forreel` project at `/Users/josh/play/
 - **Yarn 3.8.0** with PnP disabled (uses `node_modules`)
 - Always use `yarn` not `npm`
 
+### Transcoding & Playback Pipeline
+
+> **Full spec:** [`docs/TRANSCODING_PIPELINE.md`](docs/TRANSCODING_PIPELINE.md) (v4.0)
+
+The transcoding pipeline enables playback on any device from any server hardware.
+
+#### 7-Tier Playback Hierarchy
+
+The system attempts playback in strict fallback order:
+
+| Priority | Mode | Video | Audio | When |
+|----------|------|-------|-------|------|
+| 1 | Direct Play | Source | Source | Client supports everything |
+| 2 | Direct + Audio Transcode | Source | Encode | Video OK, audio unsupported |
+| 3 | Remux | Copy | Copy | Container incompatible |
+| 4 | Remux + Audio Transcode | Copy | Encode | Container fix + audio |
+| 5 | Remux-to-HLS | Copy | Copy | Range unreliable, keyframes OK |
+| 6 | Remux-to-HLS + Audio Transcode | Copy | Encode | HLS + audio transcode |
+| 7 | Transcode-to-HLS | Encode | Encode | Full transcode needed |
+
+**Rule: Never show "format not supported" error.** Always fall back gracefully.
+
+#### Key Concepts
+
+- **PlaybackPlan**: Single source of truth for all playback decisions. Computed once, drives FFmpeg commands, cache keys, and logging.
+- **FFmpegCapabilityManifest**: Runtime-tested manifest of encoders, decoders, filters, and hwaccel support. Gates all decision branches.
+- **Epochs**: HLS discontinuities triggered by seeks, track switches, quality changes. Each epoch resets `MEDIA-SEQUENCE` to 0.
+
+#### FFmpeg Patterns
+
+```bash
+# Probe media
+ffprobe -v quiet -print_format json -show_format -show_streams input.mkv
+
+# Audio-only transcode (video copy) - fast startup, low CPU
+ffmpeg -i input.mkv -c:v copy -c:a aac -b:a 256k -f hls -hls_time 4 out.m3u8
+
+# HLS with required flags
+ffmpeg -i input.mkv \
+  -c:v libx264 -preset fast -crf 23 \
+  -c:a aac -b:a 128k \
+  -f hls -hls_time 4 -hls_list_size 0 \
+  -muxdelay 0 -muxpreload 0 \
+  -avoid_negative_ts make_zero -start_at_zero \
+  playlist.m3u8
+```
+
+#### Content Quirks
+
+| Quirk | Detection | Handling |
+|-------|-----------|----------|
+| Interlaced | `field_order` in probe | `yadif` or `bwdif` filter |
+| Variable Frame Rate | Multiple `avg_frame_rate` | `-vsync cfr -r {target}` |
+| Sparse Keyframes | Keyframe analysis >8s | Force transcode (no remux-to-HLS) |
+| Legacy Container (AVI) | Format name | Remux to MP4 |
+
+#### Resume Position Contract
+
+Resume time is **always stored in source-file time**, regardless of playback speed or transcoding.
+
+#### Cache Key Components
+
+Cache keys derived from PlaybackPlan include:
+- Media ID + pipeline version
+- Mode + container
+- Video action/codec + audio action/codec/channels
+- Subtitle mode + HDR mode
+- Quirk flags (deinterlace, CFR conversion)
+- Speed + audio normalization
+
+#### Related Files
+
+- Types: `packages/core/src/types/playback.ts`
+- Router: `apps/server/src/routers/playback.ts`
+- Schema: `packages/db/src/schema/playback.ts`
+
 ### UI Components (Gluestack-UI v3)
 
 **Always use gluestack-ui components when building UIs.** Components are located in `apps/web/src/components/ui/`.
