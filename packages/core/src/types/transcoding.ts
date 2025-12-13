@@ -756,6 +756,130 @@ export const QUALITY_PROFILES: Record<string, TranscodingProfile> = {
 };
 
 // =============================================================================
+// HLS Types
+// =============================================================================
+
+/** HLS segment container format */
+export type HLSSegmentFormat = 'ts' | 'fmp4';
+
+/** HLS playlist type */
+export type HLSPlaylistType = 'EVENT' | 'VOD';
+
+/** HLS segment metadata */
+export interface HLSSegment {
+  index: number;
+  epochIndex: number;
+  duration: number;
+  filename: string;
+  path: string;
+  byteSize?: number;
+  startTime: number; // Media time in seconds
+  endTime: number;
+  isPartial?: boolean;
+  discontinuity?: boolean; // Marks start of new epoch
+}
+
+/** HLS media playlist state */
+export interface HLSMediaPlaylist {
+  sessionId: string;
+  mediaId: string;
+  epochIndex: number;
+  targetDuration: number;
+  mediaSequence: number;
+  discontinuitySequence: number;
+  playlistType: HLSPlaylistType;
+  segments: HLSSegment[];
+  endList: boolean;
+}
+
+/** HLS audio rendition for multi-track audio */
+export interface HLSAudioRendition {
+  groupId: string;
+  name: string;
+  language: string;
+  isDefault: boolean;
+  autoSelect: boolean;
+  channels: number;
+  uri: string;
+}
+
+/** HLS master playlist structure */
+export interface HLSMasterPlaylist {
+  sessionId: string;
+  mediaId: string;
+  variants: HLSVariant[];
+  audioRenditions: HLSAudioRendition[];
+}
+
+/** HLS variant stream (quality level) */
+export interface HLSVariant {
+  bandwidth: number;
+  averageBandwidth?: number;
+  resolution?: { width: number; height: number };
+  frameRate?: number;
+  codecs: string;
+  audioGroup?: string;
+  uri: string;
+}
+
+/** Epoch transition event */
+export interface EpochTransition {
+  sessionId: string;
+  fromEpoch: number;
+  toEpoch: number;
+  reason: EpochTransitionReason;
+  mediaTime: number; // Source media time at transition
+  timestamp: string;
+}
+
+/** Reasons for epoch transitions */
+export type EpochTransitionReason =
+  | 'session_start'
+  | 'seek'
+  | 'track_switch'
+  | 'quality_change'
+  | 'subtitle_toggle'
+  | 'speed_change'
+  | 'error_recovery';
+
+/** FFmpeg process state */
+export interface FFmpegProcessState {
+  pid?: number;
+  status: 'starting' | 'running' | 'paused' | 'stopping' | 'stopped' | 'error';
+  startedAt?: string;
+  lastOutputAt?: string;
+  segmentsProduced: number;
+  currentMediaTime: number;
+  errorMessage?: string;
+  restartCount: number;
+}
+
+/** Transcode queue job for queue management */
+export interface TranscodeQueueJob {
+  id: string;
+  sessionId: string;
+  mediaId: string;
+  userId: string;
+  priority: 'interactive' | 'prefetch' | 'trickplay' | 'background';
+  status: 'queued' | 'active' | 'completed' | 'failed' | 'cancelled';
+  playbackPlan: PlaybackPlan;
+  startPosition: number;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  progress?: {
+    segmentsCompleted: number;
+    currentTime: number;
+    estimatedTimeRemaining?: number;
+  };
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+  };
+}
+
+// =============================================================================
 // Pipeline Schema Version
 // =============================================================================
 
