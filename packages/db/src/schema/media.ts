@@ -32,6 +32,10 @@ export const movies = sqliteTable('movies', {
   posterBlurhash: text('poster_blurhash'),
   backdropBlurhash: text('backdrop_blurhash'),
   genres: text('genres'), // JSON array
+  /** Original language of the content (ISO 639-1 code from TMDB, e.g., "en", "ja") */
+  originalLanguage: text('original_language'),
+  /** Origin countries (JSON array of ISO 3166-1 alpha-2 codes, e.g., ["US", "GB"]) */
+  originCountry: text('origin_country'),
   duration: integer('duration'),
   videoCodec: text('video_codec'),
   audioCodec: text('audio_codec'),
@@ -81,6 +85,10 @@ export const tvShows = sqliteTable('tv_shows', {
   posterBlurhash: text('poster_blurhash'),
   backdropBlurhash: text('backdrop_blurhash'),
   genres: text('genres'), // JSON array
+  /** Original language of the content (ISO 639-1 code from TMDB, e.g., "en", "ja") */
+  originalLanguage: text('original_language'),
+  /** Origin countries (JSON array of ISO 3166-1 alpha-2 codes, e.g., ["US", "JP"]) */
+  originCountry: text('origin_country'),
   seasonCount: integer('season_count').notNull().default(0),
   episodeCount: integer('episode_count').notNull().default(0),
   matchStatus: text('match_status', {

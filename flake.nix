@@ -43,8 +43,9 @@
             corepack enable >/dev/null 2>&1
 
             # === Required Environment Variables ===
-            # Use absolute path to avoid issues with CWD changes
-            export DATABASE_URL="file:$PWD/apps/server/data/mediaserver.db"
+            # Get the workspace root (git root) regardless of current directory
+            WORKSPACE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+            export DATABASE_URL="file:$WORKSPACE_ROOT/apps/server/data/mediaserver.db"
             export JWT_SECRET="dev-jwt-secret-change-in-production-32chars"
             export JWT_REFRESH_SECRET="dev-refresh-secret-change-in-production-32ch"
 
@@ -56,7 +57,7 @@
 
             # === Redis/Valkey Configuration ===
             export REDIS_URL="redis://localhost:6379"
-            export VALKEY_DATA_DIR="$PWD/.valkey"
+            export VALKEY_DATA_DIR="$WORKSPACE_ROOT/.valkey"
 
             # === Paths ===
             export DATA_DIR="./data"

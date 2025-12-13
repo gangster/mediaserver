@@ -144,3 +144,45 @@ export {
   useResumeQueue,
 } from './useJobs.js';
 
+// Subtitle hooks (track retrieval only)
+export {
+  useMovieSubtitles,
+  useEpisodeSubtitles,
+  useAvailableSubtitleLanguages,
+} from './useSubtitles.js';
+export type { SubtitleTrack, LanguageOption } from './useSubtitles.js';
+
+// Audio hooks
+export {
+  useMovieAudioTracks,
+  useEpisodeAudioTracks,
+  useAvailableAudioLanguages,
+} from './useAudio.js';
+export type { AudioTrack } from './useAudio.js';
+
+// Playback preferences hooks (unified audio + subtitle preferences)
+export {
+  usePlaybackPreferences,
+  useUpdatePlaybackPreferences,
+  useLanguageRules,
+  useCreateLanguageRule,
+  useUpdateLanguageRule,
+  useDeleteLanguageRule,
+  useToggleLanguageRule,
+  useMediaLanguageOverride,
+  useSetMediaLanguageOverride,
+  useClearMediaLanguageOverride,
+  useSessionState,
+  useUpdateSessionState,
+  useClearSessionState,
+} from './usePlaybackPreferences.js';
+export type {
+  SubtitleMode,
+  AudioQualityPreference,
+  PlaybackPreferences,
+  LanguageRuleConditions,
+  LanguageRule,
+  MediaLanguageOverride,
+  SessionState,
+} from './usePlaybackPreferences.js';
+

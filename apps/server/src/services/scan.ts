@@ -10,6 +10,8 @@ import type { ScanProgress, ScanResult, ParsedMovie, ParsedEpisode } from '@medi
 import { logger } from '../lib/logger.js';
 import { dirname } from 'node:path';
 import { fetchPendingMovieMetadata, fetchPendingShowMetadata } from './metadata.js';
+import { scanSubtitles } from './subtitles.js';
+import { saveAudioTracks } from './audio-tracks.js';
 
 /** Generate a unique ID */
 function generateId(): string {
@@ -189,11 +191,19 @@ async function processResults(
               updatedAt: new Date().toISOString(),
             })
             .where(eq(movies.id, existing.id));
+          
+          // Scan subtitles and audio tracks
+          if (result.probe?.streams) {
+            await scanSubtitles(db, 'movie', existing.id, result.path, result.probe.streams);
+            await saveAudioTracks(db, 'movie', existing.id, result.probe.streams);
+          }
+          
           stats.updated++;
         } else {
           // Insert new movie
+          const movieId = generateId();
           await db.insert(movies).values({
-            id: generateId(),
+            id: movieId,
             libraryId,
             filePath: result.path,
             title: title || 'Unknown',
@@ -207,6 +217,13 @@ async function processResults(
             needsTranscode: result.probe?.needsTranscode,
             matchStatus: 'pending',
           });
+          
+          // Scan subtitles and audio tracks
+          if (result.probe?.streams) {
+            await scanSubtitles(db, 'movie', movieId, result.path, result.probe.streams);
+            await saveAudioTracks(db, 'movie', movieId, result.probe.streams);
+          }
+          
           stats.added++;
         }
       } catch (error) {
@@ -315,10 +332,18 @@ async function processResults(
                   updatedAt: new Date().toISOString(),
                 })
                 .where(eq(episodes.id, existing.id));
+              
+              // Scan subtitles and audio tracks
+              if (result.probe?.streams) {
+                await scanSubtitles(db, 'episode', existing.id, result.path, result.probe.streams);
+                await saveAudioTracks(db, 'episode', existing.id, result.probe.streams);
+              }
+              
               stats.updated++;
             } else {
+              const episodeId = generateId();
               await db.insert(episodes).values({
-                id: generateId(),
+                id: episodeId,
                 showId,
                 seasonId,
                 filePath: result.path,
@@ -333,6 +358,13 @@ async function processResults(
                 directPlayable: result.probe?.directPlayable,
                 needsTranscode: result.probe?.needsTranscode,
               });
+              
+              // Scan subtitles and audio tracks
+              if (result.probe?.streams) {
+                await scanSubtitles(db, 'episode', episodeId, result.path, result.probe.streams);
+                await saveAudioTracks(db, 'episode', episodeId, result.probe.streams);
+              }
+              
               stats.added++;
             }
           }

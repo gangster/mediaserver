@@ -18,6 +18,9 @@ import { setupRouter } from './setup.js';
 import { metadataRouter } from './metadata.js';
 import { integrationsRouter } from './integrations.js';
 import { jobsRouter } from './jobs.js';
+import { subtitlesRouter } from './subtitles.js';
+import { audioRouter } from './audio.js';
+import { playbackPreferencesRouter } from './playback-preferences.js';
 
 /**
  * Main application router.
@@ -38,6 +41,9 @@ export const appRouter = router({
   metadata: metadataRouter,
   integrations: integrationsRouter,
   jobs: jobsRouter,
+  subtitles: subtitlesRouter,
+  audio: audioRouter,
+  playbackPreferences: playbackPreferencesRouter,
 });
 
 /** Type of the app router - used for client type inference */

@@ -107,6 +107,10 @@ export interface MovieDetails {
   revenue?: number;
   /** Homepage URL */
   homepage?: string;
+  /** Origin country (ISO 3166-1 alpha-2) */
+  originCountry?: string[];
+  /** Original language (ISO 639-1) */
+  originalLanguage?: string;
 }
 
 // =============================================================================

@@ -302,6 +302,8 @@ async function saveMovieMetadata(
       posterPath: details.posterPath,
       backdropPath: details.backdropPath,
       genres: JSON.stringify(genreNames), // Store genres as JSON array for filtering
+      originalLanguage: details.originalLanguage,
+      originCountry: details.originCountry ? JSON.stringify(details.originCountry) : null,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(movies.id, movieId));
@@ -1104,6 +1106,8 @@ async function saveShowMetadata(
       posterPath: details.posterPath,
       backdropPath: details.backdropPath,
       genres: JSON.stringify(genreNames), // Store genres as JSON array for filtering
+      originalLanguage: details.originalLanguage,
+      originCountry: details.originCountry ? JSON.stringify(details.originCountry) : null,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(tvShows.id, showId));

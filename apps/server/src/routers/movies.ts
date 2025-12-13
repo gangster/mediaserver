@@ -478,6 +478,7 @@ export const moviesRouter = router({
 
   /**
    * Get recently added movies.
+   * Deduplicates to show only highest quality version of each movie.
    */
   recentlyAdded: protectedProcedure
     .input(z.object({ limit: z.number().min(1).max(50).default(10) }))
@@ -503,11 +504,16 @@ export const moviesRouter = router({
         )})`;
       }
 
-      return ctx.db.query.movies.findMany({
+      // Fetch more than needed to account for duplicates
+      const results = await ctx.db.query.movies.findMany({
         where: libraryCondition,
         orderBy: [desc(movies.addedAt)],
-        limit: input.limit,
+        limit: input.limit * 3, // Fetch extra to account for duplicate versions
       });
+
+      // Deduplicate and return only the requested limit
+      const dedupedResults = deduplicateMovies(results);
+      return dedupedResults.slice(0, input.limit);
     }),
 
   /**

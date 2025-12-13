@@ -10,8 +10,9 @@ import { Layout } from '../src/components/layout';
 import { useAuth } from '../src/hooks/useAuth';
 import { usePreferencesStore } from '../src/stores/preferences';
 import { IntegrationsTab } from '../src/components/settings';
+import { SubtitlePreferences } from '../src/components/settings/SubtitlePreferences';
 
-type SettingsTab = 'general' | 'integrations';
+type SettingsTab = 'general' | 'playback' | 'integrations';
 
 export default function SettingsPage() {
   const { user, isAdmin, logout } = useAuth();
@@ -27,6 +28,7 @@ export default function SettingsPage() {
 
   const tabs: { id: SettingsTab; label: string; adminOnly?: boolean }[] = [
     { id: 'general', label: 'General' },
+    { id: 'playback', label: 'Playback' },
     { id: 'integrations', label: 'Integrations', adminOnly: true },
   ];
 
@@ -202,6 +204,14 @@ export default function SettingsPage() {
           </View>
         )}
 
+        {activeTab === 'playback' && (
+          <View className="px-4 sm:px-6 lg:px-8 pb-8">
+            <View className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
+              <SubtitlePreferences />
+            </View>
+          </View>
+        )}
+
         {activeTab === 'integrations' && isAdmin && (
           <View className="px-4 sm:px-6 lg:px-8 pb-8">
             <IntegrationsTab />
@@ -211,3 +221,4 @@ export default function SettingsPage() {
     </Layout>
   );
 }
+

@@ -85,3 +85,6 @@ export { RefreshMetadataButton } from './RefreshMetadataButton';
 // Cast and crew sections
 export { CastSection, GuestStarsSection } from './CastSection';
 export type { CastMember, CrewMember, GuestStar } from './CastSection';
+
+// Subtitle selector
+export { SubtitleSelector } from './SubtitleSelector';

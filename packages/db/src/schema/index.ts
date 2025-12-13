@@ -112,3 +112,22 @@ export type {
   MetadataProvider,
 } from './provider-metadata.js';
 
+// Subtitles (tracks only - preferences moved to playback-preferences)
+export { subtitleTracks } from './subtitles.js';
+
+// Audio tracks
+export { audioTracks } from './audio.js';
+
+// Playback preferences (unified audio + subtitle preferences)
+export {
+  playbackPreferences,
+  languageRules,
+  mediaLanguageOverrides,
+  playbackSessionState,
+} from './playback-preferences.js';
+export type {
+  SubtitleMode,
+  AudioQualityPreference,
+  LanguageRuleConditions,
+} from './playback-preferences.js';
+

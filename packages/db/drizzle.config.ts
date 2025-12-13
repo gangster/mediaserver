@@ -1,37 +1,29 @@
 import { defineConfig } from 'drizzle-kit';
 
 /**
- * Get the default database URL.
- * Uses process.cwd() which should be the workspace root when running via yarn/nx.
- * Falls back to a path relative to the typical workspace structure.
+ * Drizzle Kit configuration.
+ * 
+ * DATABASE_URL is set by the Nix flake to always point to the correct
+ * database location regardless of the current working directory.
+ * 
+ * Always run drizzle-kit commands inside `nix develop`:
+ *   nix develop -c npx drizzle-kit generate
+ *   nix develop -c npx drizzle-kit migrate
  */
-function getDefaultDbUrl(): string {
-  const cwd = process.cwd();
-  
-  // If running from workspace root (via yarn dev, yarn db:migrate, etc.)
-  if (cwd.endsWith('mediaserver')) {
-    return `file:${cwd}/apps/server/data/mediaserver.db`;
-  }
-  
-  // If running from packages/db directly
-  if (cwd.endsWith('packages/db')) {
-    return `file:${cwd}/../../apps/server/data/mediaserver.db`;
-  }
-  
-  // Default fallback - assume workspace root
-  return `file:${cwd}/apps/server/data/mediaserver.db`;
-}
-
 export default defineConfig({
   schema: './dist/schema/index.js',
   out: './drizzle',
   dialect: 'sqlite',
   driver: 'turso',
   dbCredentials: {
-    url: process.env['DATABASE_URL'] ?? getDefaultDbUrl(),
+    url: process.env['DATABASE_URL'] ?? (() => {
+      throw new Error(
+        'DATABASE_URL is not set. Run this command inside `nix develop`:\n' +
+        '  nix develop -c npx drizzle-kit <command>'
+      );
+    })(),
     authToken: process.env['DATABASE_AUTH_TOKEN'],
   },
   verbose: true,
   strict: true,
 });
-

@@ -16,6 +16,7 @@ import {
   createTokenFamily,
   compareTokenHash,
 } from '../lib/auth.js';
+import { seedBuiltInRules } from '../services/language-rules.js';
 
 export const authRouter = router({
   /**
@@ -147,6 +148,9 @@ export const authRouter = router({
       role,
       isActive: true,
     });
+
+    // Seed built-in language rules for the new user
+    await seedBuiltInRules(ctx.db, userId);
 
     // Create tokens
     const { token: accessToken, expiresAt } = createAccessToken(

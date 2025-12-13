@@ -81,6 +81,8 @@ export interface TmdbMovieDetails {
   production_countries: TmdbProductionCountry[];
   spoken_languages: TmdbSpokenLanguage[];
   belongs_to_collection: TmdbCollection | null;
+  original_language: string;
+  origin_country?: string[]; // Not always present for movies
   // Appended responses
   credits?: TmdbCredits;
   release_dates?: TmdbReleaseDates;
@@ -333,4 +335,5 @@ export interface TmdbImage {
   vote_average: number;
   vote_count: number;
 }
+
 

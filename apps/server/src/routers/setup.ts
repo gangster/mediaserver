@@ -29,6 +29,7 @@ import type { UserRole } from '@mediaserver/core';
 import { initializeMetadataManager } from '../services/metadata.js';
 import { queueManager, QUEUE_NAMES } from '../jobs/index.js';
 import { logger } from '../lib/logger.js';
+import { seedBuiltInRules } from '../services/language-rules.js';
 
 /** Settings keys */
 const SETUP_COMPLETE_KEY = 'setup_complete';
@@ -236,6 +237,9 @@ export const setupRouter = router({
         createdAt: now,
         updatedAt: now,
       });
+
+      // Seed built-in language rules for the new user
+      await seedBuiltInRules(ctx.db, userId);
 
       // Generate auth tokens so user is automatically logged in
       const jwtSecret = process.env['JWT_SECRET'] ?? '';

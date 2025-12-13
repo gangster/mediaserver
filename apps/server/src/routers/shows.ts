@@ -26,6 +26,24 @@ import {
   sql,
 } from '@mediaserver/db';
 
+/** Guest star from provider episode data */
+export interface GuestStar {
+  id: string;
+  name: string;
+  character?: string;
+  profilePath?: string | null;
+  order?: number;
+}
+
+/** Crew member from provider episode data */
+export interface CrewMember {
+  id: string;
+  name: string;
+  job: string;
+  department: string;
+  profilePath?: string | null;
+}
+
 export const showsRouter = router({
   /**
    * List TV shows with pagination, sorting, and filtering.
@@ -535,21 +553,6 @@ export const showsRouter = router({
       });
 
       // Parse guest stars and crew from provider data
-      interface GuestStar {
-        id: string;
-        name: string;
-        character?: string;
-        profilePath?: string | null;
-        order?: number;
-      }
-      interface CrewMember {
-        id: string;
-        name: string;
-        job: string;
-        department: string;
-        profilePath?: string | null;
-      }
-
       let guestStars: GuestStar[] = [];
       let episodeCrew: CrewMember[] = [];
       

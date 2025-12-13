@@ -199,6 +199,8 @@ export class TmdbIntegration implements MetadataIntegration {
       budget: movie.budget || undefined,
       revenue: movie.revenue || undefined,
       homepage: movie.homepage ?? undefined,
+      originCountry: movie.origin_country ?? movie.production_countries?.map((c) => c.iso_3166_1),
+      originalLanguage: movie.original_language,
     };
   }
 
@@ -394,4 +396,5 @@ export class TmdbIntegration implements MetadataIntegration {
 // Export the client for direct use if needed
 export { TmdbClient, TmdbRateLimitError, TmdbApiError } from './client.js';
 export type { TmdbClientConfig } from './client.js';
+
 

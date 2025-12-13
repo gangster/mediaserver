@@ -170,23 +170,76 @@ export default function MovieDetailPage() {
   const technicalDetails = useMemo(() => {
     if (!movie) return null;
 
+    // Build mediaStreams array for the TechnicalDetails component
+    type MediaStreamType = {
+      index: number;
+      type: 'video' | 'audio' | 'subtitle';
+      codec: string;
+      language?: string;
+      title?: string;
+      isDefault?: boolean;
+      width?: number;
+      height?: number;
+      frameRate?: number;
+      hdr?: boolean;
+      profile?: string;
+      pixelFormat?: string;
+      bitRate?: number;
+      channels?: number;
+      channelLayout?: string;
+      sampleRate?: number;
+      forced?: boolean;
+      hearingImpaired?: boolean;
+    };
+
     // If we have detailed file stats, use them
     if (fileStats) {
-      const videoStream = fileStats.videoStreams[0];
-      const audioStream = fileStats.audioStreams[0];
-      const subtitleLanguages = fileStats.subtitleStreams
-        ?.map((s: { language?: string }) => s.language)
-        .filter((l?: string): l is string => !!l) ?? [];
+      const mediaStreams: MediaStreamType[] = [];
+      
+      // Add video streams
+      for (const v of fileStats.videoStreams ?? []) {
+        mediaStreams.push({
+          index: v.index,
+          type: 'video',
+          codec: v.codec,
+          width: v.width,
+          height: v.height,
+          frameRate: v.frameRate,
+          hdr: !!v.hdr,
+          pixelFormat: v.pixelFormat,
+          bitRate: v.bitRate,
+        });
+      }
+      
+      // Add audio streams
+      for (const a of fileStats.audioStreams ?? []) {
+        mediaStreams.push({
+          index: a.index,
+          type: 'audio',
+          codec: a.codec,
+          language: a.language,
+          title: a.title,
+          channels: a.channels,
+          channelLayout: a.channelLayout,
+          sampleRate: a.sampleRate,
+          bitRate: a.bitRate,
+        });
+      }
+      
+      // Add subtitle streams
+      for (const s of fileStats.subtitleStreams ?? []) {
+        mediaStreams.push({
+          index: s.index,
+          type: 'subtitle',
+          codec: s.codec,
+          language: s.language,
+          title: s.title,
+          forced: s.forced,
+        });
+      }
 
       return {
-        videoCodec: videoStream?.codec ?? movie.videoCodec ?? null,
-        audioCodec: audioStream?.codec ?? movie.audioCodec ?? null,
-        resolution: videoStream?.resolution ?? movie.resolution ?? null,
-        runtime: movie.runtime ?? null,
         duration: fileStats.duration ?? movie.duration ?? null,
-        frameRate: videoStream?.frameRate ?? null,
-        channels: audioStream?.channelLayout ?? (audioStream?.channels ? `${audioStream.channels}.0` : null),
-        hdr: videoStream?.hdr ?? null,
         container: fileStats.container ?? null,
         fileName: fileStats.fileName ?? null,
         filePath: fileStats.filePath ?? null,
@@ -194,43 +247,67 @@ export default function MovieDetailPage() {
         bitRate: fileStats.bitRate ?? null,
         tmdbId: movie.tmdbId ?? null,
         imdbId: movie.imdbId ?? null,
-        subtitleLanguages,
+        mediaStreams,
       };
     }
 
-    // Fallback to parsing movie data directly
-    const streams = movie.mediaStreams ?? [];
-    const videoStream = streams.find((s: { codec_type?: string }) => s.codec_type === 'video');
-    const audioStream = streams.find((s: { codec_type?: string }) => s.codec_type === 'audio');
-
-    const fileName = movie.filePath?.split('/').pop() ?? null;
-    const container = fileName?.split('.').pop()?.toUpperCase() ?? null;
-
-    const subtitleStreams = streams.filter((s: { codec_type?: string }) => s.codec_type === 'subtitle');
-    const subtitleLanguages = subtitleStreams
-      .map((s: { tags?: { language?: string } }) => s.tags?.language)
-      .filter((l: string | undefined): l is string => !!l);
-
-    // Safely parse frame rate
-    let frameRate: number | null = null;
-    if (videoStream?.r_frame_rate) {
-      const parts = videoStream.r_frame_rate.split('/');
-      if (parts.length === 2) {
-        const num = parseFloat(parts[0]);
-        const den = parseFloat(parts[1]);
-        if (den > 0) frameRate = num / den;
+    // Fallback to parsing movie.mediaStreams directly
+    const rawStreams = movie.mediaStreams ?? [];
+    const mediaStreams: MediaStreamType[] = [];
+    
+    for (const s of rawStreams) {
+      if (s.codec_type === 'video') {
+        // Parse frame rate
+        let frameRate: number | undefined;
+        if (s.r_frame_rate) {
+          const parts = s.r_frame_rate.split('/');
+          if (parts.length === 2) {
+            const num = parseFloat(parts[0] ?? '0');
+            const den = parseFloat(parts[1] ?? '1');
+            if (den > 0) frameRate = num / den;
+          }
+        }
+        
+        mediaStreams.push({
+          index: s.index ?? mediaStreams.length,
+          type: 'video',
+          codec: s.codec_name ?? 'unknown',
+          width: s.width,
+          height: s.height,
+          frameRate,
+          hdr: s.color_primaries === 'bt2020',
+          pixelFormat: s.pix_fmt,
+          bitRate: s.bit_rate ? parseInt(s.bit_rate) : undefined,
+        });
+      } else if (s.codec_type === 'audio') {
+        mediaStreams.push({
+          index: s.index ?? mediaStreams.length,
+          type: 'audio',
+          codec: s.codec_name ?? 'unknown',
+          language: s.tags?.language,
+          title: s.tags?.title,
+          channels: s.channels,
+          channelLayout: s.channel_layout,
+          sampleRate: s.sample_rate,
+          bitRate: s.bit_rate ? parseInt(s.bit_rate) : undefined,
+        });
+      } else if (s.codec_type === 'subtitle') {
+        mediaStreams.push({
+          index: s.index ?? mediaStreams.length,
+          type: 'subtitle',
+          codec: s.codec_name ?? 'unknown',
+          language: s.tags?.language,
+          title: s.tags?.title,
+          forced: s.disposition?.forced === 1,
+        });
       }
     }
 
+    const fileName = movie.filePath?.split('/').pop() ?? null;
+    const container = fileName?.split('.').pop()?.toLowerCase() ?? null;
+
     return {
-      videoCodec: movie.videoCodec ?? videoStream?.codec_name ?? null,
-      audioCodec: movie.audioCodec ?? audioStream?.codec_name ?? null,
-      resolution: movie.resolution ?? (videoStream?.width && videoStream?.height ? `${videoStream.width}x${videoStream.height}` : null),
-      runtime: movie.runtime ?? null,
       duration: movie.duration ?? null,
-      frameRate,
-      channels: audioStream?.channels ? `${audioStream.channels}.${audioStream.channels > 6 ? '1' : '0'}` : null,
-      hdr: videoStream?.color_primaries === 'bt2020' ? 'HDR10' : null,
       container,
       fileName,
       filePath: movie.filePath ?? null,
@@ -238,7 +315,7 @@ export default function MovieDetailPage() {
       bitRate: null,
       tmdbId: movie.tmdbId ?? null,
       imdbId: movie.imdbId ?? null,
-      subtitleLanguages,
+      mediaStreams,
     };
   }, [movie, fileStats]);
 
@@ -509,14 +586,14 @@ export default function MovieDetailPage() {
 
             {/* Cast & Crew */}
             <CastSection
-              cast={credits?.cast?.map((c) => ({
+              cast={credits?.cast?.map((c: { id: string; name: string; character: string; profilePath: string | null; order: number }) => ({
                 id: c.id,
                 name: c.name,
                 character: c.character,
                 profilePath: c.profilePath,
                 order: c.order,
               })) ?? []}
-              crew={credits?.crew?.map((c) => ({
+              crew={credits?.crew?.map((c: { id: string; name: string; job: string; department: string; profilePath: string | null }) => ({
                 id: c.id,
                 name: c.name,
                 job: c.job,
@@ -542,14 +619,7 @@ export default function MovieDetailPage() {
             {technicalDetails && (
               <View style={{ marginTop: 48 }}>
                 <TechnicalDetails
-                  videoCodec={technicalDetails.videoCodec}
-                  audioCodec={technicalDetails.audioCodec}
-                  resolution={technicalDetails.resolution}
-                  runtime={technicalDetails.runtime}
                   duration={technicalDetails.duration}
-                  frameRate={technicalDetails.frameRate}
-                  channels={technicalDetails.channels}
-                  hdr={technicalDetails.hdr}
                   container={technicalDetails.container}
                   fileName={technicalDetails.fileName}
                   filePath={technicalDetails.filePath}
@@ -557,7 +627,8 @@ export default function MovieDetailPage() {
                   bitRate={technicalDetails.bitRate}
                   tmdbId={technicalDetails.tmdbId}
                   imdbId={technicalDetails.imdbId}
-                  subtitleLanguages={technicalDetails.subtitleLanguages}
+                  mediaStreams={technicalDetails.mediaStreams}
+                  mediaType="movie"
                   isLoading={fileStatsLoading}
                 />
               </View>
