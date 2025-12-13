@@ -219,3 +219,4 @@ export const homeSectionNames: Record<keyof HomePreferences, string> = {
   showTopRated: 'Top Rated',
   showStats: 'Library Statistics',
 };
+

@@ -62,3 +62,4 @@ export function useGlobalSearch(): UseGlobalSearchReturn {
 
   return { isOpen, open, close, toggle };
 }
+

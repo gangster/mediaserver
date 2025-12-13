@@ -68,3 +68,4 @@ export function MultiRating({ ratings, variant = 'default', maxRatings }: MultiR
 
 export default MultiRating;
 
+

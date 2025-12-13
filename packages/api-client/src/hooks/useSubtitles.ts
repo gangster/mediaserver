@@ -31,6 +31,12 @@ export interface LanguageOption {
   name: string;
 }
 
+/** Available language shape (returned from available language endpoints) */
+export interface AvailableLanguage {
+  code: string;
+  name: string;
+}
+
 /**
  * Get subtitle tracks for a movie.
  */
@@ -55,5 +61,5 @@ export function useEpisodeSubtitles(episodeId: string, enabled = true) {
  * Get available subtitle languages across all media.
  */
 export function useAvailableSubtitleLanguages(enabled = true) {
-  return trpc.subtitles.getAvailableLanguages.useQuery(undefined, { enabled });
+  return trpc.playbackPreferences.getAvailableSubtitleLanguages.useQuery(undefined, { enabled });
 }

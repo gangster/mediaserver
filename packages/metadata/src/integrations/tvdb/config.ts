@@ -41,3 +41,4 @@ export function createTvdbConfig(apiKey: string, overrides?: Partial<TvdbConfig>
     ...overrides,
   };
 }
+

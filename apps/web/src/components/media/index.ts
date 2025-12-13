@@ -86,5 +86,8 @@ export { RefreshMetadataButton } from './RefreshMetadataButton';
 export { CastSection, GuestStarsSection } from './CastSection';
 export type { CastMember, CrewMember, GuestStar } from './CastSection';
 
-// Subtitle selector
+// Subtitle selector (legacy - use TrackSelector instead)
 export { SubtitleSelector } from './SubtitleSelector';
+
+// Unified track selector (audio + subtitles)
+export { TrackSelector } from './TrackSelector';

@@ -143,3 +143,4 @@ export interface TraktSearchResult {
   movie?: TraktMovie;
   show?: TraktShow;
 }
+

@@ -150,7 +150,7 @@ export {
   useEpisodeSubtitles,
   useAvailableSubtitleLanguages,
 } from './useSubtitles.js';
-export type { SubtitleTrack, LanguageOption } from './useSubtitles.js';
+export type { SubtitleTrack, LanguageOption, AvailableLanguage } from './useSubtitles.js';
 
 // Audio hooks
 export {
@@ -175,6 +175,7 @@ export {
   useSessionState,
   useUpdateSessionState,
   useClearSessionState,
+  useTrackSelection,
 } from './usePlaybackPreferences.js';
 export type {
   SubtitleMode,
@@ -184,5 +185,6 @@ export type {
   LanguageRule,
   MediaLanguageOverride,
   SessionState,
+  TrackSelectionResult,
 } from './usePlaybackPreferences.js';
 

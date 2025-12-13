@@ -217,3 +217,4 @@ export function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
 }
 
 export default MobileMenu;
+

@@ -19,3 +19,4 @@ export { createScanProcessor } from './workers/scan.worker.js';
 export { createMetadataProcessor } from './workers/metadata.worker.js';
 export { initializeJobQueue, getJobQueue, shutdownJobQueue } from './init.js';
 
+

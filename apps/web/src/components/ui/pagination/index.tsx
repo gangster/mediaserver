@@ -85,3 +85,4 @@ export function Pagination({ total, offset, limit, onPageChange }: PaginationPro
 }
 
 export default Pagination;
+

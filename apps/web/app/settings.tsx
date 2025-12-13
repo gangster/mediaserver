@@ -2,21 +2,30 @@
  * Settings Page
  *
  * User and app settings with tabbed navigation for admin features.
+ *
+ * UX Notes:
+ * - Tab state is persisted in the URL so refreshing keeps you on the same tab
+ * - All settings auto-save (no save buttons)
+ * - Settings are not collapsed - everything visible by default
  */
 
-import { useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import { View, Text, ScrollView, Pressable, Switch } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { Layout } from '../src/components/layout';
 import { useAuth } from '../src/hooks/useAuth';
 import { usePreferencesStore } from '../src/stores/preferences';
-import { IntegrationsTab } from '../src/components/settings';
-import { SubtitlePreferences } from '../src/components/settings/SubtitlePreferences';
+import { IntegrationsTab, LanguagePreferences } from '../src/components/settings';
 
 type SettingsTab = 'general' | 'playback' | 'integrations';
 
+const DEFAULT_TAB: SettingsTab = 'general';
+
 export default function SettingsPage() {
+  const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string }>();
   const { user, isAdmin, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const {
     showRatings,
     setShowRatings,
@@ -26,54 +35,83 @@ export default function SettingsPage() {
     setReduceMotion,
   } = usePreferencesStore();
 
-  const tabs: { id: SettingsTab; label: string; adminOnly?: boolean }[] = [
-    { id: 'general', label: 'General' },
-    { id: 'playback', label: 'Playback' },
-    { id: 'integrations', label: 'Integrations', adminOnly: true },
+  // Get active tab from URL, default to 'general'
+  const activeTab = (params.tab as SettingsTab) || DEFAULT_TAB;
+
+  const tabs: { id: SettingsTab; label: string; icon: keyof typeof Ionicons.glyphMap; adminOnly?: boolean }[] = [
+    { id: 'general', label: 'General', icon: 'person-outline' },
+    { id: 'playback', label: 'Playback', icon: 'play-circle-outline' },
+    { id: 'integrations', label: 'Integrations', icon: 'extension-puzzle-outline', adminOnly: true },
   ];
 
   const visibleTabs = tabs.filter((tab) => !tab.adminOnly || isAdmin);
 
+  // Validate tab on mount - redirect to default if invalid
+  useEffect(() => {
+    const validTabIds = visibleTabs.map((t) => t.id);
+    if (params.tab && !validTabIds.includes(params.tab as SettingsTab)) {
+      router.replace(`/settings?tab=${DEFAULT_TAB}`);
+    }
+  }, [params.tab, visibleTabs, router]);
+
+  // Handle tab change - update URL
+  const handleTabChange = useCallback(
+    (tabId: SettingsTab) => {
+      // Use replace to avoid building up history for tab changes
+      router.replace(`/settings?tab=${tabId}`);
+    },
+    [router]
+  );
+
   return (
     <Layout>
-      <ScrollView className="flex-1 bg-zinc-900">
+      <ScrollView style={{ flex: 1, backgroundColor: '#18181b' }}>
         {/* Header */}
-        <View className="px-4 sm:px-6 lg:px-8 pt-8 pb-6">
-          <Text className="text-2xl sm:text-3xl font-bold text-white">
+        <View style={{ paddingHorizontal: 24, paddingTop: 32, paddingBottom: 24 }}>
+          <Text style={{ fontSize: 32, fontWeight: '700', color: '#ffffff' }}>
             Settings
           </Text>
         </View>
 
         {/* Tabs */}
         {visibleTabs.length > 1 && (
-          <View className="px-4 sm:px-6 lg:px-8 mb-6">
+          <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
             <View
               style={{
                 flexDirection: 'row',
-                backgroundColor: '#18181b',
-                borderRadius: 8,
+                backgroundColor: '#09090b',
+                borderRadius: 12,
                 padding: 4,
-                gap: 4,
               }}
             >
               {visibleTabs.map((tab) => (
                 <Pressable
                   key={tab.id}
-                  onPress={() => setActiveTab(tab.id)}
+                  onPress={() => handleTabChange(tab.id)}
                   style={{
                     flex: 1,
-                    paddingVertical: 10,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    paddingVertical: 14,
                     paddingHorizontal: 16,
-                    borderRadius: 6,
+                    borderRadius: 8,
                     backgroundColor:
                       activeTab === tab.id ? '#27272a' : 'transparent',
+                    minHeight: 48, // Touch-friendly
                   }}
                 >
+                  <Ionicons
+                    name={tab.icon}
+                    size={18}
+                    color={activeTab === tab.id ? '#ffffff' : '#71717a'}
+                  />
                   <Text
                     style={{
-                      textAlign: 'center',
                       fontWeight: '500',
-                      color: activeTab === tab.id ? '#fff' : '#a1a1aa',
+                      fontSize: 15,
+                      color: activeTab === tab.id ? '#ffffff' : '#71717a',
                     }}
                   >
                     {tab.label}
@@ -86,30 +124,38 @@ export default function SettingsPage() {
 
         {/* Content */}
         {activeTab === 'general' && (
-          <View className="px-4 sm:px-6 lg:px-8 pb-8 gap-6">
+          <View style={{ paddingHorizontal: 24, paddingBottom: 48, gap: 24 }}>
             {/* Profile Section */}
-            <View className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
-              <Text className="text-lg font-semibold text-white mb-4">
-                Profile
-              </Text>
-              <View className="gap-4">
-                <View className="flex flex-row items-center gap-4">
-                  <View className="w-16 h-16 rounded-full bg-zinc-700 flex items-center justify-center">
-                    <Text className="text-2xl text-zinc-300 font-medium">
+            <View style={sectionStyle}>
+              <Text style={sectionTitleStyle}>Profile</Text>
+              <View style={{ gap: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                  <View
+                    style={{
+                      width: 64,
+                      height: 64,
+                      borderRadius: 32,
+                      backgroundColor: '#3f3f46',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text style={{ fontSize: 24, color: '#d4d4d8', fontWeight: '600' }}>
                       {user?.displayName?.[0]?.toUpperCase() ||
                         user?.email?.[0]?.toUpperCase() ||
                         '?'}
                     </Text>
                   </View>
-                  <View className="flex-1">
-                    <Text className="text-white font-medium text-lg">
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 18 }}>
                       {user?.displayName || user?.email?.split('@')[0]}
                     </Text>
-                    <Text className="text-zinc-400">{user?.email}</Text>
+                    <Text style={{ color: '#a1a1aa', fontSize: 14 }}>{user?.email}</Text>
                     {isAdmin && (
-                      <Text className="text-indigo-400 text-sm mt-1">
-                        Administrator
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                        <Ionicons name="shield-checkmark" size={14} color="#818cf8" />
+                        <Text style={{ color: '#818cf8', fontSize: 13 }}>Administrator</Text>
+                      </View>
                     )}
                   </View>
                 </View>
@@ -117,103 +163,70 @@ export default function SettingsPage() {
             </View>
 
             {/* Display Preferences */}
-            <View className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
-              <Text className="text-lg font-semibold text-white mb-4">
-                Display
-              </Text>
-              <View className="gap-4">
-                <View className="flex flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text className="text-white">Show Ratings</Text>
-                    <Text className="text-zinc-400 text-sm">
-                      Display rating badges on media cards
-                    </Text>
-                  </View>
-                  <Switch
-                    value={showRatings}
-                    onValueChange={setShowRatings}
-                    trackColor={{ false: '#3f3f46', true: '#059669' }}
-                    thumbColor="#ffffff"
-                  />
-                </View>
-                <View className="flex flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text className="text-white">Show Progress</Text>
-                    <Text className="text-zinc-400 text-sm">
-                      Display watch progress bars on cards
-                    </Text>
-                  </View>
-                  <Switch
-                    value={showProgress}
-                    onValueChange={setShowProgress}
-                    trackColor={{ false: '#3f3f46', true: '#059669' }}
-                    thumbColor="#ffffff"
-                  />
-                </View>
+            <View style={sectionStyle}>
+              <Text style={sectionTitleStyle}>Display</Text>
+              <View style={{ gap: 4 }}>
+                <SettingToggle
+                  label="Show Ratings"
+                  description="Display rating badges on media cards"
+                  value={showRatings}
+                  onChange={setShowRatings}
+                />
+                <SettingToggle
+                  label="Show Progress"
+                  description="Display watch progress bars on cards"
+                  value={showProgress}
+                  onChange={setShowProgress}
+                />
               </View>
             </View>
 
             {/* Accessibility */}
-            <View className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
-              <Text className="text-lg font-semibold text-white mb-4">
-                Accessibility
-              </Text>
-              <View className="gap-4">
-                <View className="flex flex-row items-center justify-between">
-                  <View className="flex-1">
-                    <Text className="text-white">Reduce Motion</Text>
-                    <Text className="text-zinc-400 text-sm">
-                      Minimize animations throughout the app
-                    </Text>
-                  </View>
-                  <Switch
-                    value={reduceMotion}
-                    onValueChange={setReduceMotion}
-                    trackColor={{ false: '#3f3f46', true: '#059669' }}
-                    thumbColor="#ffffff"
-                  />
-                </View>
+            <View style={sectionStyle}>
+              <Text style={sectionTitleStyle}>Accessibility</Text>
+              <View style={{ gap: 4 }}>
+                <SettingToggle
+                  label="Reduce Motion"
+                  description="Minimize animations throughout the app"
+                  value={reduceMotion}
+                  onChange={setReduceMotion}
+                />
               </View>
             </View>
 
             {/* Account Actions */}
-            <View className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
-              <Text className="text-lg font-semibold text-white mb-4">
-                Account
-              </Text>
+            <View style={sectionStyle}>
+              <Text style={sectionTitleStyle}>Account</Text>
               <Pressable
                 onPress={logout}
-                className="flex flex-row items-center gap-3 px-4 py-3 bg-red-600/10 rounded-lg active:bg-red-600/20"
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingVertical: 16,
+                  paddingHorizontal: 20,
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  borderRadius: 12,
+                  minHeight: 56,
+                }}
               >
-                <svg
-                  className="w-5 h-5 text-red-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                  />
-                </svg>
-                <Text className="text-red-400 font-medium">Sign Out</Text>
+                <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+                <Text style={{ color: '#ef4444', fontWeight: '600', fontSize: 16 }}>
+                  Sign Out
+                </Text>
               </Pressable>
             </View>
           </View>
         )}
 
         {activeTab === 'playback' && (
-          <View className="px-4 sm:px-6 lg:px-8 pb-8">
-            <View className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-              <SubtitlePreferences />
-            </View>
+          <View style={{ paddingHorizontal: 24, paddingBottom: 48 }}>
+            <LanguagePreferences />
           </View>
         )}
 
         {activeTab === 'integrations' && isAdmin && (
-          <View className="px-4 sm:px-6 lg:px-8 pb-8">
+          <View style={{ paddingHorizontal: 24, paddingBottom: 48 }}>
             <IntegrationsTab />
           </View>
         )}
@@ -222,3 +235,65 @@ export default function SettingsPage() {
   );
 }
 
+// =============================================================================
+// Helper Components
+// =============================================================================
+
+function SettingToggle({
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <Pressable
+      onPress={() => onChange(!value)}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 16,
+        minHeight: 72, // Large touch target
+        borderBottomWidth: 1,
+        borderBottomColor: '#27272a',
+      }}
+    >
+      <View style={{ flex: 1, marginRight: 16 }}>
+        <Text style={{ color: '#ffffff', fontSize: 16, fontWeight: '500', marginBottom: 4 }}>
+          {label}
+        </Text>
+        <Text style={{ color: '#71717a', fontSize: 14 }}>{description}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: '#3f3f46', true: '#818cf8' }}
+        thumbColor="#ffffff"
+      />
+    </Pressable>
+  );
+}
+
+// =============================================================================
+// Styles
+// =============================================================================
+
+const sectionStyle = {
+  backgroundColor: '#09090b',
+  borderRadius: 16,
+  padding: 20,
+  borderWidth: 1,
+  borderColor: '#27272a',
+};
+
+const sectionTitleStyle = {
+  fontSize: 18,
+  fontWeight: '600' as const,
+  color: '#ffffff',
+  marginBottom: 16,
+};

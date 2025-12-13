@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Layout } from '../../../src/components/layout';
 import { useEpisode, type MetadataProvider } from '@mediaserver/api-client';
 import { useAuth } from '../../../src/hooks/useAuth';
-import { MetadataSourceSelector, RefreshMetadataButton, GuestStarsSection, TechnicalDetails } from '../../../src/components/media';
+import { MetadataSourceSelector, RefreshMetadataButton, GuestStarsSection, TechnicalDetails, TrackSelector } from '../../../src/components/media';
 import { getMediaImageUrl } from '../../../src/lib/config';
 import { formatRuntime, formatDate, normalizeTitle } from '../../../src/lib/format';
 
@@ -535,6 +535,13 @@ export default function EpisodeDetailPage() {
                     <RefreshMetadataButton type="tvshow" itemId={episode.show.id} />
                   )}
                 </View>
+
+                {/* Track Selector - Audio and Subtitle selection */}
+                <TrackSelector
+                  mediaType="episode"
+                  mediaId={episode.id}
+                  showId={episode.show?.id}
+                />
 
                 {/* Genre tags */}
                 {episode.show?.genres && episode.show.genres.length > 0 && (

@@ -46,6 +46,6 @@ export function useEpisodeAudioTracks(episodeId: string, enabled = true) {
  * Get available audio languages across all media.
  */
 export function useAvailableAudioLanguages(enabled = true) {
-  return trpc.audio.getAvailableLanguages.useQuery(undefined, { enabled });
+  return trpc.playbackPreferences.getAvailableAudioLanguages.useQuery(undefined, { enabled });
 }
 

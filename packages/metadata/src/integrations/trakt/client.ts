@@ -353,3 +353,4 @@ export class TraktClient {
     );
   }
 }
+

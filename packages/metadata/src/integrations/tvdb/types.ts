@@ -151,3 +151,4 @@ export const ARTWORK_TYPES = {
   BACKGROUND: 3,
   ICON: 5,
 } as const;
+

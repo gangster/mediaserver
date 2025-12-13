@@ -236,3 +236,4 @@ export function HomeSettingsButton({ onPress }: { onPress: () => void }) {
 }
 
 export default HomeSettingsPanel;
+

@@ -244,3 +244,34 @@ export function useClearSessionState() {
   });
 }
 
+// =============================================================================
+// Track Selection Hook
+// =============================================================================
+
+export interface TrackSelectionResult {
+  audioTrackId: string | null;
+  subtitleTrackId: string | null;
+  forcedSubtitleTrackId: string | null;
+  audioMismatch: boolean;
+  subtitleMismatch: boolean;
+  audioLanguageUsed: string | null;
+  subtitleLanguageUsed: string | null;
+}
+
+/**
+ * Select the best audio and subtitle tracks for a media item.
+ * Considers: session state > per-media override > matching rules > global preferences.
+ */
+export function useTrackSelection(
+  mediaType: 'movie' | 'episode',
+  mediaId: string,
+  showId?: string,
+  enabled = true
+) {
+  return trpc.playbackPreferences.selectTracks.useQuery(
+    { mediaType, mediaId, showId },
+    { enabled: enabled && !!mediaId }
+  );
+}
+
+

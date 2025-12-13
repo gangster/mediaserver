@@ -30,3 +30,4 @@ export function isArtworkIntegration(
   return 'getMovieArtwork' in integration && 'getShowArtwork' in integration;
 }
 
+

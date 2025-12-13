@@ -2,6 +2,10 @@
  * Component exports.
  */
 
+// Focus & Accessibility
+export { FocusableView } from './FocusableView.js';
+export type { FocusableViewProps } from './FocusableView.js';
+
 // Core components
 export { Button } from './Button.js';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './Button.js';

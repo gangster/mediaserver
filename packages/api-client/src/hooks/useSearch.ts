@@ -37,3 +37,4 @@ export function useTrending(limit = 10) {
   return trpc.search.trending.useQuery({ limit });
 }
 
+

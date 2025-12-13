@@ -399,3 +399,4 @@ export function Sidebar({ onSearch, className = '' }: SidebarProps) {
 }
 
 export default Sidebar;
+

@@ -11,6 +11,9 @@ export * from './theme/index.js';
 // Utilities
 export * from './utils/index.js';
 
+// Hooks
+export * from './hooks/index.js';
+
 // Components
 export * from './components/index.js';
 

@@ -23,3 +23,4 @@ export const trailers = sqliteTable('trailers', {
     .default(sql`(datetime('now'))`),
 });
 
+

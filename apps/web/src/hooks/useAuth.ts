@@ -90,3 +90,4 @@ export function useRequireAdmin() {
     shouldRedirect: auth.isInitialized && (!auth.isAuthenticated || !auth.isAdmin),
   };
 }
+

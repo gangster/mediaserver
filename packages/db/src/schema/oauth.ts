@@ -35,3 +35,4 @@ export const oauthTokens = sqliteTable(
     userProviderIdx: index('oauth_tokens_user_provider_idx').on(table.userId, table.provider),
   })
 );
+

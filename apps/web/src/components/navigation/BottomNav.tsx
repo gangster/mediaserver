@@ -219,3 +219,4 @@ export function BottomNav({ className = '' }: BottomNavProps) {
 }
 
 export default BottomNav;
+

@@ -7,3 +7,4 @@ import { Slot } from 'expo-router';
 export default function TraktLayout() {
   return <Slot />;
 }
+

@@ -30,3 +30,4 @@ export function isRatingsIntegration(
   return 'getMovieRatings' in integration && 'getShowRatings' in integration;
 }
 
+

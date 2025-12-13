@@ -21,3 +21,4 @@ export type { TraktConfig, TraktUserCredentials, TraktHistoryItem } from './trak
 // Re-export types for convenience
 export * from './tmdb/types.js';
 
+

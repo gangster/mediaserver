@@ -60,3 +60,4 @@ export interface TraktUserCredentials {
   /** Token expiry timestamp (ISO string) */
   expiresAt: string;
 }
+

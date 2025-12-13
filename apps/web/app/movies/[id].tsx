@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Layout } from '../../src/components/layout';
 import { useMovie, useMovieFileStats, useMovieCredits, useRatingSources, type MetadataProvider } from '@mediaserver/api-client';
 import { useAuth } from '../../src/hooks/useAuth';
-import { MultiRating, LegacyRating, TechnicalDetails, MetadataSourceSelector, RefreshMetadataButton, CastSection, type RatingData, type ProviderMetadataResult } from '../../src/components/media';
+import { MultiRating, LegacyRating, TechnicalDetails, MetadataSourceSelector, RefreshMetadataButton, CastSection, TrackSelector, type RatingData, type ProviderMetadataResult } from '../../src/components/media';
 import { getMediaImageUrl, getLogoUrl } from '../../src/lib/config';
 
 /**
@@ -520,6 +520,14 @@ export default function MovieDetailPage() {
                     <RefreshMetadataButton type="movie" itemId={id} />
                   )}
                 </View>
+
+                {/* Track Selector - Audio and Subtitle selection */}
+                {id && (
+                  <TrackSelector
+                    mediaType="movie"
+                    mediaId={id}
+                  />
+                )}
 
                 {/* Genres */}
                 {displayGenres && displayGenres.length > 0 && (

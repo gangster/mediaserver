@@ -14,12 +14,16 @@ import {
   languageRules,
   mediaLanguageOverrides,
   playbackSessionState,
+  audioTracks,
+  subtitleTracks,
   eq,
   and,
   asc,
+  sql,
 } from '@mediaserver/db';
 import { nanoid } from 'nanoid';
 import { logger } from '../lib/logger.js';
+import { selectTracks } from '../services/track-selection.js';
 
 const log = logger.child({ router: 'playback-preferences' });
 
@@ -559,5 +563,85 @@ export const playbackPreferencesRouter = router({
 
       return { success: true };
     }),
+
+  // ===========================================================================
+  // Track Selection
+  // ===========================================================================
+
+  /**
+   * Select the best audio and subtitle tracks for a media item.
+   *
+   * This considers: session state > per-media override > matching rules > global preferences.
+   * Returns the selected track IDs along with mismatch information.
+   */
+  selectTracks: protectedProcedure
+    .input(
+      z.object({
+        mediaType: z.enum(['movie', 'episode']),
+        mediaId: uuidSchema,
+        showId: uuidSchema.optional(), // Required for episodes
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const result = await selectTracks(
+        ctx.db,
+        ctx.userId,
+        input.mediaType,
+        input.mediaId,
+        input.showId
+      );
+
+      return {
+        audioTrackId: result.audioTrackId,
+        subtitleTrackId: result.subtitleTrackId,
+        forcedSubtitleTrackId: result.forcedSubtitleTrackId,
+        audioMismatch: result.audioMismatch,
+        subtitleMismatch: result.subtitleMismatch,
+        audioLanguageUsed: result.audioLanguageUsed,
+        subtitleLanguageUsed: result.subtitleLanguageUsed,
+      };
+    }),
+
+  // ===========================================================================
+  // Available Languages
+  // ===========================================================================
+
+  /**
+   * Get all distinct audio languages available in the library.
+   */
+  getAvailableAudioLanguages: protectedProcedure.query(async ({ ctx }) => {
+    const results = await ctx.db
+      .selectDistinct({
+        language: audioTracks.language,
+        languageName: audioTracks.languageName,
+      })
+      .from(audioTracks)
+      .where(sql`${audioTracks.language} IS NOT NULL AND ${audioTracks.language} != ''`)
+      .orderBy(asc(audioTracks.languageName));
+
+    return results.map((r) => ({
+      code: r.language!,
+      name: r.languageName ?? r.language!,
+    }));
+  }),
+
+  /**
+   * Get all distinct subtitle languages available in the library.
+   */
+  getAvailableSubtitleLanguages: protectedProcedure.query(async ({ ctx }) => {
+    const results = await ctx.db
+      .selectDistinct({
+        language: subtitleTracks.language,
+        languageName: subtitleTracks.languageName,
+      })
+      .from(subtitleTracks)
+      .where(sql`${subtitleTracks.language} IS NOT NULL AND ${subtitleTracks.language} != ''`)
+      .orderBy(asc(subtitleTracks.languageName));
+
+    return results.map((r) => ({
+      code: r.language!,
+      name: r.languageName ?? r.language!,
+    }));
+  }),
 });
 
