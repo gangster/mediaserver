@@ -12,6 +12,12 @@ import {
   episodes,
   watchProgress,
   libraryPermissions,
+  genres,
+  showGenres,
+  mediaRatings,
+  showCredits,
+  people,
+  providerEpisodes,
   eq,
   and,
   desc,
@@ -155,14 +161,123 @@ export const showsRouter = router({
         orderBy: [asc(seasons.seasonNumber)],
       });
 
+      // Fetch ratings from media_ratings table
+      const ratings = await ctx.db.query.mediaRatings.findMany({
+        where: and(
+          eq(mediaRatings.mediaType, 'show'),
+          eq(mediaRatings.mediaId, input.id)
+        ),
+      });
+
       // Parse JSON fields
-      const genres = show.genres ? JSON.parse(show.genres) : [];
+      const genresParsed = show.genres ? JSON.parse(show.genres) : [];
 
       return {
         ...show,
-        genres,
+        genres: genresParsed,
         seasons: showSeasons,
+        ratings: ratings.map((r) => ({
+          source: r.source,
+          score: r.score,
+          scoreNormalized: r.scoreNormalized,
+          scoreFormatted: r.scoreFormatted ?? `${r.score}`,
+          voteCount: r.voteCount ?? undefined,
+          updatedAt: r.updatedAt,
+        })),
       };
+    }),
+
+  /**
+   * Get cast and crew for a TV show.
+   */
+  getCredits: protectedProcedure
+    .input(z.object({ id: uuidSchema, maxCast: z.number().optional(), maxCrew: z.number().optional() }))
+    .query(async ({ ctx, input }) => {
+      const { id, maxCast = 20, maxCrew = 15 } = input;
+
+      // Get all credits with joined person data
+      const credits = await ctx.db
+        .select({
+          id: showCredits.id,
+          personId: showCredits.personId,
+          roleType: showCredits.roleType,
+          character: showCredits.character,
+          department: showCredits.department,
+          job: showCredits.job,
+          creditOrder: showCredits.creditOrder,
+          personName: people.name,
+          profilePath: people.profilePath,
+          tmdbId: people.tmdbId,
+        })
+        .from(showCredits)
+        .innerJoin(people, eq(showCredits.personId, people.id))
+        .where(eq(showCredits.showId, id))
+        .orderBy(asc(showCredits.creditOrder));
+
+      // Separate cast and crew
+      const cast = credits
+        .filter((c) => c.roleType === 'cast')
+        .slice(0, maxCast)
+        .map((c) => ({
+          id: c.personId,
+          tmdbId: c.tmdbId,
+          name: c.personName,
+          character: c.character ?? '',
+          profilePath: c.profilePath,
+          order: c.creditOrder ?? 0,
+        }));
+
+      // Get key crew members (creators, showrunners, producers, etc.)
+      const priorityRoles = [
+        'Creator',
+        'Executive Producer',
+        'Showrunner',
+        'Producer',
+        'Director',
+        'Writer',
+        'Director of Photography',
+        'Original Music Composer',
+        'Composer',
+      ];
+
+      const allCrew = credits.filter((c) => c.roleType === 'crew');
+      
+      // Deduplicate by person ID, keeping highest priority role
+      const crewMap = new Map<string, typeof allCrew[0]>();
+      for (const member of allCrew) {
+        const existing = crewMap.get(member.personId);
+        if (!existing) {
+          crewMap.set(member.personId, member);
+        } else {
+          const existingPriority = priorityRoles.indexOf(existing.job ?? '');
+          const newPriority = priorityRoles.indexOf(member.job ?? '');
+          if (newPriority !== -1 && (existingPriority === -1 || newPriority < existingPriority)) {
+            crewMap.set(member.personId, member);
+          }
+        }
+      }
+
+      // Sort by role priority and limit
+      const crew = Array.from(crewMap.values())
+        .sort((a, b) => {
+          const aPriority = priorityRoles.indexOf(a.job ?? '');
+          const bPriority = priorityRoles.indexOf(b.job ?? '');
+          if (aPriority === -1 && bPriority === -1) return 0;
+          if (aPriority === -1) return 1;
+          if (bPriority === -1) return -1;
+          return aPriority - bPriority;
+        })
+        .slice(0, maxCrew)
+        .map((c) => ({
+          id: c.personId,
+          tmdbId: c.tmdbId,
+          name: c.personName,
+          job: c.job ?? '',
+          department: c.department ?? '',
+          profilePath: c.profilePath,
+        }));
+
+      return { cast, crew };
     }),
 
   /**
@@ -202,10 +317,31 @@ export const showsRouter = router({
       }
 
       // Get episodes for this season
-      const seasonEpisodes = await ctx.db.query.episodes.findMany({
+      const allSeasonEpisodes = await ctx.db.query.episodes.findMany({
         where: eq(episodes.seasonId, season.id),
         orderBy: [asc(episodes.episodeNumber)],
       });
+
+      // Deduplicate episodes by episode number (pick highest quality version)
+      const qualityOrder: Record<string, number> = { '4K': 5, '2160p': 5, '1080p': 4, '720p': 3, '480p': 2, '360p': 1 };
+      const getQualityScore = (res: string | null): number => {
+        if (!res) return 0;
+        for (const [key, score] of Object.entries(qualityOrder)) {
+          if (res.toUpperCase().includes(key.toUpperCase())) return score;
+        }
+        return 0;
+      };
+
+      const seasonEpisodesMap = new Map<number, typeof allSeasonEpisodes[0]>();
+      for (const ep of allSeasonEpisodes) {
+        const existing = seasonEpisodesMap.get(ep.episodeNumber);
+        if (!existing || getQualityScore(ep.resolution) > getQualityScore(existing.resolution)) {
+          seasonEpisodesMap.set(ep.episodeNumber, ep);
+        }
+      }
+      const seasonEpisodes = Array.from(seasonEpisodesMap.values()).sort(
+        (a, b) => a.episodeNumber - b.episodeNumber
+      );
 
       // Get watch progress for all episodes
       const episodeIds = seasonEpisodes.map((e) => e.id);
@@ -262,7 +398,7 @@ export const showsRouter = router({
     }),
 
   /**
-   * Get a single episode.
+   * Get a single episode with full detail including navigation and season episodes.
    */
   getEpisode: protectedProcedure
     .input(z.object({ id: uuidSchema }))
@@ -278,10 +414,20 @@ export const showsRouter = router({
         });
       }
 
-      // Get show and season info
+      // Get show info with genres
       const show = await ctx.db.query.tvShows.findFirst({
         where: eq(tvShows.id, episode.showId),
       });
+
+      if (!show) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Show not found for episode',
+        });
+      }
+
+      // Parse show genres
+      const showGenresList = show.genres ? JSON.parse(show.genres) : [];
 
       const season = await ctx.db.query.seasons.findFirst({
         where: eq(seasons.id, episode.seasonId),
@@ -292,7 +438,7 @@ export const showsRouter = router({
         const permission = await ctx.db.query.libraryPermissions.findFirst({
           where: and(
             eq(libraryPermissions.userId, ctx.userId),
-            eq(libraryPermissions.libraryId, show!.libraryId),
+            eq(libraryPermissions.libraryId, show.libraryId),
             eq(libraryPermissions.canView, true)
           ),
         });
@@ -305,7 +451,7 @@ export const showsRouter = router({
         }
       }
 
-      // Get watch progress
+      // Get watch progress for this episode
       const progress = await ctx.db.query.watchProgress.findFirst({
         where: and(
           eq(watchProgress.userId, ctx.userId),
@@ -314,6 +460,65 @@ export const showsRouter = router({
         ),
       });
 
+      // Get all episodes in this season for navigation and episode strip
+      const allSeasonEpisodes = await ctx.db.query.episodes.findMany({
+        where: eq(episodes.seasonId, episode.seasonId),
+        orderBy: [asc(episodes.episodeNumber)],
+      });
+
+      // Deduplicate episodes by episode number (pick highest quality version)
+      const qualityOrder: Record<string, number> = { '4K': 5, '2160p': 5, '1080p': 4, '720p': 3, '480p': 2, '360p': 1 };
+      const getQualityScore = (res: string | null): number => {
+        if (!res) return 0;
+        for (const [key, score] of Object.entries(qualityOrder)) {
+          if (res.toUpperCase().includes(key.toUpperCase())) return score;
+        }
+        return 0;
+      };
+
+      const seasonEpisodesMap = new Map<number, typeof allSeasonEpisodes[0]>();
+      for (const ep of allSeasonEpisodes) {
+        const existing = seasonEpisodesMap.get(ep.episodeNumber);
+        if (!existing || getQualityScore(ep.resolution) > getQualityScore(existing.resolution)) {
+          seasonEpisodesMap.set(ep.episodeNumber, ep);
+        }
+      }
+      const seasonEpisodes = Array.from(seasonEpisodesMap.values()).sort(
+        (a, b) => a.episodeNumber - b.episodeNumber
+      );
+
+      // Get watch progress for all season episodes
+      const allProgress = await ctx.db.query.watchProgress.findMany({
+        where: and(
+          eq(watchProgress.userId, ctx.userId),
+          eq(watchProgress.mediaType, 'episode'),
+        ),
+      });
+      const progressMap = new Map(allProgress.map((p) => [p.mediaId, p]));
+
+      // Find previous and next episodes (across seasons if needed)
+      const allShowEpisodesRaw = await ctx.db.query.episodes.findMany({
+        where: eq(episodes.showId, episode.showId),
+        orderBy: [asc(episodes.seasonNumber), asc(episodes.episodeNumber)],
+      });
+
+      // Deduplicate all show episodes for navigation
+      const allShowEpisodesMap = new Map<string, typeof allShowEpisodesRaw[0]>();
+      for (const ep of allShowEpisodesRaw) {
+        const key = `${ep.seasonNumber}-${ep.episodeNumber}`;
+        const existing = allShowEpisodesMap.get(key);
+        if (!existing || getQualityScore(ep.resolution) > getQualityScore(existing.resolution)) {
+          allShowEpisodesMap.set(key, ep);
+        }
+      }
+      const allShowEpisodes = Array.from(allShowEpisodesMap.values()).sort(
+        (a, b) => a.seasonNumber - b.seasonNumber || a.episodeNumber - b.episodeNumber
+      );
+
+      const currentIndex = allShowEpisodes.findIndex((e) => e.id === episode.id);
+      const previousEpisode = currentIndex > 0 ? allShowEpisodes[currentIndex - 1] : null;
+      const nextEpisode = currentIndex < allShowEpisodes.length - 1 ? allShowEpisodes[currentIndex + 1] : null;
+
       const mediaStreams = episode.mediaStreams
         ? JSON.parse(episode.mediaStreams)
         : [];
@@ -321,18 +526,61 @@ export const showsRouter = router({
         ? JSON.parse(episode.subtitlePaths)
         : [];
 
+      // Get guest stars from provider_episodes
+      const providerEpisode = await ctx.db.query.providerEpisodes.findFirst({
+        where: and(
+          eq(providerEpisodes.episodeId, episode.id),
+          eq(providerEpisodes.provider, 'tmdb')
+        ),
+      });
+
+      // Parse guest stars and crew from provider data
+      interface GuestStar {
+        id: string;
+        name: string;
+        character?: string;
+        profilePath?: string | null;
+        order?: number;
+      }
+      interface CrewMember {
+        id: string;
+        name: string;
+        job: string;
+        department: string;
+        profilePath?: string | null;
+      }
+
+      let guestStars: GuestStar[] = [];
+      let episodeCrew: CrewMember[] = [];
+      
+      if (providerEpisode?.guestStars) {
+        try {
+          guestStars = JSON.parse(providerEpisode.guestStars);
+        } catch {
+          // ignore parse errors
+        }
+      }
+      if (providerEpisode?.crew) {
+        try {
+          episodeCrew = JSON.parse(providerEpisode.crew);
+        } catch {
+          // ignore parse errors
+        }
+      }
+
       return {
         ...episode,
         mediaStreams,
         subtitlePaths,
-        show: show
-          ? {
-              id: show.id,
-              title: show.title,
-              posterPath: show.posterPath,
-              backdropPath: show.backdropPath,
-            }
-          : null,
+        guestStars,
+        episodeCrew,
+        show: {
+          id: show.id,
+          title: show.title,
+          posterPath: show.posterPath,
+          backdropPath: show.backdropPath,
+          genres: showGenresList,
+        },
         season: season
           ? {
               id: season.id,
@@ -348,6 +596,42 @@ export const showsRouter = router({
               isWatched: progress.isWatched,
             }
           : null,
+        // Episode navigation
+        previousEpisode: previousEpisode
+          ? {
+              id: previousEpisode.id,
+              seasonNumber: previousEpisode.seasonNumber,
+              episodeNumber: previousEpisode.episodeNumber,
+              title: previousEpisode.title,
+              stillPath: previousEpisode.stillPath,
+            }
+          : null,
+        nextEpisode: nextEpisode
+          ? {
+              id: nextEpisode.id,
+              seasonNumber: nextEpisode.seasonNumber,
+              episodeNumber: nextEpisode.episodeNumber,
+              title: nextEpisode.title,
+              stillPath: nextEpisode.stillPath,
+            }
+          : null,
+        // Season episodes for strip
+        seasonEpisodes: seasonEpisodes.map((e) => {
+          const ep = progressMap.get(e.id);
+          return {
+            id: e.id,
+            episodeNumber: e.episodeNumber,
+            title: e.title,
+            stillPath: e.stillPath,
+            runtime: e.runtime,
+            watchProgress: ep
+              ? {
+                  percentage: ep.percentage,
+                  isWatched: ep.isWatched,
+                }
+              : null,
+          };
+        }),
       };
     }),
 
@@ -439,22 +723,16 @@ export const showsRouter = router({
 
   /**
    * Get all unique genres across TV shows.
+   * Queries the normalized showGenres join table.
    */
   genres: protectedProcedure.query(async ({ ctx }) => {
     const results = await ctx.db
-      .select({ genres: tvShows.genres })
-      .from(tvShows)
-      .where(sql`${tvShows.genres} IS NOT NULL`);
+      .selectDistinct({ name: genres.name })
+      .from(genres)
+      .innerJoin(showGenres, eq(genres.id, showGenres.genreId))
+      .orderBy(asc(genres.name));
 
-    const genreSet = new Set<string>();
-    for (const row of results) {
-      if (row.genres) {
-        const parsed = JSON.parse(row.genres) as string[];
-        parsed.forEach((g) => genreSet.add(g));
-      }
-    }
-
-    return Array.from(genreSet).sort();
+    return results.map((r) => r.name).filter((n): n is string => n !== null);
   }),
 
   /**

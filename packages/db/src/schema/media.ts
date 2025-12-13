@@ -72,6 +72,7 @@ export const tvShows = sqliteTable('tv_shows', {
   lastAirDate: text('last_air_date'),
   status: text('status'),
   network: text('network'),
+  networkLogoPath: text('network_logo_path'),
   contentRating: text('content_rating'),
   voteAverage: real('vote_average'),
   voteCount: integer('vote_count'),

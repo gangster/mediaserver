@@ -8,7 +8,7 @@
 import { Hono } from 'hono';
 import { mkdir, access, readFile, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { createDatabaseFromEnv, movies, tvShows, eq, type Database } from '@mediaserver/db';
+import { createDatabaseFromEnv, movies, tvShows, episodes, eq, type Database } from '@mediaserver/db';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
@@ -227,6 +227,15 @@ imagesRouter.get('/:mediaType/:mediaId/:imageType', async (c) => {
       });
       if (show) {
         tmdbPath = imageType === 'poster' ? show.posterPath : show.backdropPath;
+      }
+    } else if (mediaType === 'episodes') {
+      const episode = await database.query.episodes.findFirst({
+        where: eq(episodes.id, mediaId),
+        columns: { stillPath: true },
+      });
+      if (episode) {
+        // Episodes only have still images
+        tmdbPath = episode.stillPath;
       }
     } else {
       return c.json({ error: 'Invalid media type' }, 400);

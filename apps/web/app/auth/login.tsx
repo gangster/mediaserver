@@ -4,7 +4,7 @@
  * Styled to match forreel project with split layout and branding.
  */
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { View, Text, TextInput, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { Link, useRouter, Redirect } from 'expo-router';
 import { useForm, Controller } from 'react-hook-form';
@@ -18,6 +18,7 @@ export default function Login() {
   const { data: setupStatus, isLoading: setupLoading } = useSetupStatus();
   const router = useRouter();
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const passwordInputRef = useRef<TextInput>(null);
 
   const {
     control,
@@ -148,6 +149,7 @@ export default function Login() {
                     autoCapitalize="none"
                     autoComplete="email"
                     keyboardType="email-address"
+                    returnKeyType="next"
                     value={value}
                     onChangeText={onChange}
                     onBlur={() => {
@@ -155,6 +157,7 @@ export default function Login() {
                       setFocusedField(null);
                     }}
                     onFocus={() => setFocusedField('email')}
+                    onSubmitEditing={() => passwordInputRef.current?.focus()}
                   />
                 )}
               />
@@ -171,6 +174,7 @@ export default function Login() {
                 name="password"
                 render={({ field: { onChange, onBlur, value } }) => (
                   <TextInput
+                    ref={passwordInputRef}
                     className={`w-full px-4 py-3 rounded-lg bg-zinc-800/50 text-white placeholder:text-zinc-500 border ${
                       errors.password
                         ? 'border-red-500/50'
@@ -182,6 +186,7 @@ export default function Login() {
                     placeholderTextColor="#71717a"
                     secureTextEntry
                     autoComplete="current-password"
+                    returnKeyType="go"
                     value={value}
                     onChangeText={onChange}
                     onBlur={() => {
@@ -189,6 +194,7 @@ export default function Login() {
                       setFocusedField(null);
                     }}
                     onFocus={() => setFocusedField('password')}
+                    onSubmitEditing={handleSubmit(onSubmit)}
                   />
                 )}
               />
@@ -226,3 +232,4 @@ export default function Login() {
     </View>
   );
 }
+

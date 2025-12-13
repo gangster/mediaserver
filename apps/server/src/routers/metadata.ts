@@ -1,19 +1,21 @@
 /**
  * Metadata router - search, identify, and refresh metadata.
+ * 
+ * Supports multi-provider architecture where metadata from all configured
+ * providers is cached, enabling instant provider switching in the UI.
  */
 
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import { router, protectedProcedure, adminProcedure } from './trpc.js';
 import { idSchema } from '@mediaserver/config';
-import { movies, tvShows, eq, and } from '@mediaserver/db';
-import {
-  getMetadataManager,
-  fetchMovieMetadata,
-  fetchShowMetadata,
-  fetchPendingMovieMetadata,
-  fetchPendingShowMetadata,
-} from '../services/metadata.js';
+import { movies, tvShows, libraries, providerMetadata, providerCredits, eq, and } from '@mediaserver/db';
+import { getMetadataManager } from '../services/metadata.js';
+import { getJobQueue } from '../jobs/init.js';
+import { QUEUE_NAMES } from '../jobs/types.js';
+
+/** Valid metadata provider IDs */
+const providerSchema = z.enum(['tmdb', 'tvdb', 'anidb', 'anilist', 'mal', 'omdb', 'trakt']);
 
 export const metadataRouter = router({
   /**
@@ -119,6 +121,7 @@ export const metadataRouter = router({
 
   /**
    * Refresh metadata for a single item.
+   * Creates a job that will be processed in the background.
    */
   refresh: adminProcedure
     .input(
@@ -128,24 +131,62 @@ export const metadataRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Set status to pending first to force re-fetch
+      const queue = getJobQueue();
+
       if (input.type === 'movie') {
+        // Get movie details for the job
+        const movie = await ctx.db.query.movies.findFirst({
+          where: eq(movies.id, input.itemId),
+        });
+
+        if (!movie) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Movie not found' });
+        }
+
+        // Set status to pending
         await ctx.db.update(movies)
           .set({ matchStatus: 'pending' })
           .where(eq(movies.id, input.itemId));
 
-        return fetchMovieMetadata(ctx.db, input.itemId);
+        // Add job to queue
+        const jobId = await queue.addJob(QUEUE_NAMES.METADATA, {
+          type: 'refresh_movie',
+          movieId: input.itemId,
+          movieTitle: movie.title,
+          force: true,
+        });
+
+        return { jobId, queued: true };
       } else {
+        // Get show details for the job
+        const show = await ctx.db.query.tvShows.findFirst({
+          where: eq(tvShows.id, input.itemId),
+        });
+
+        if (!show) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Show not found' });
+        }
+
+        // Set status to pending
         await ctx.db.update(tvShows)
           .set({ matchStatus: 'pending' })
           .where(eq(tvShows.id, input.itemId));
 
-        return fetchShowMetadata(ctx.db, input.itemId);
+        // Add job to queue
+        const jobId = await queue.addJob(QUEUE_NAMES.METADATA, {
+          type: 'refresh_show',
+          showId: input.itemId,
+          showTitle: show.title,
+          force: true,
+        });
+
+        return { jobId, queued: true };
       }
     }),
 
   /**
    * Refresh all metadata for a library.
+   * Creates a job that will be processed in the background.
    */
   refreshAll: adminProcedure
     .input(
@@ -155,40 +196,47 @@ export const metadataRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Reset all items to pending status
-      if (input.type === 'movie' || !input.type) {
-        const whereClause = input.libraryId
-          ? eq(movies.libraryId, input.libraryId)
-          : undefined;
+      const queue = getJobQueue();
+      const jobIds: string[] = [];
 
-        await ctx.db.update(movies)
-          .set({ matchStatus: 'pending' })
-          .where(whereClause);
+      // If a specific library is provided, create a library refresh job
+      if (input.libraryId) {
+        const library = await ctx.db.query.libraries.findFirst({
+          where: eq(libraries.id, input.libraryId),
+        });
+
+        if (!library) {
+          throw new TRPCError({ code: 'NOT_FOUND', message: 'Library not found' });
+        }
+
+        const jobId = await queue.addJob(QUEUE_NAMES.METADATA, {
+          type: 'refresh_library',
+          libraryId: input.libraryId,
+          libraryName: library.name,
+          force: true,
+        });
+
+        return { jobIds: [jobId], queued: true, count: 1 };
       }
 
-      if (input.type === 'tv' || !input.type) {
-        const whereClause = input.libraryId
-          ? eq(tvShows.libraryId, input.libraryId)
-          : undefined;
+      // Otherwise, create jobs for all libraries
+      const allLibraries = await ctx.db.query.libraries.findMany();
 
-        await ctx.db.update(tvShows)
-          .set({ matchStatus: 'pending' })
-          .where(whereClause);
+      for (const library of allLibraries) {
+        // Filter by type if specified
+        if (input.type && library.type !== input.type) continue;
+
+        const jobId = await queue.addJob(QUEUE_NAMES.METADATA, {
+          type: 'refresh_library',
+          libraryId: library.id,
+          libraryName: library.name,
+          force: true,
+        });
+
+        jobIds.push(jobId);
       }
 
-      // Fetch metadata
-      const movieStats = (input.type === 'movie' || !input.type)
-        ? await fetchPendingMovieMetadata(ctx.db, input.libraryId)
-        : { matched: 0, unmatched: 0, errors: 0 };
-
-      const showStats = (input.type === 'tv' || !input.type)
-        ? await fetchPendingShowMetadata(ctx.db, input.libraryId)
-        : { matched: 0, unmatched: 0, errors: 0 };
-
-      return {
-        movies: movieStats,
-        shows: showStats,
-      };
+      return { jobIds, queued: true, count: jobIds.length };
     }),
 
   /**
@@ -268,6 +316,113 @@ export const metadataRouter = router({
     }),
 
   /**
+   * Get cached metadata for a specific provider.
+   * 
+   * Returns the pre-cached metadata from the provider_metadata table,
+   * enabling instant provider switching without API calls.
+   */
+  getProviderMetadata: protectedProcedure
+    .input(
+      z.object({
+        type: z.enum(['movie', 'show']),
+        itemId: idSchema,
+        provider: providerSchema,
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const metadata = await ctx.db.query.providerMetadata.findFirst({
+        where: and(
+          eq(providerMetadata.mediaType, input.type),
+          eq(providerMetadata.mediaId, input.itemId),
+          eq(providerMetadata.provider, input.provider)
+        ),
+      });
+
+      if (!metadata) {
+        return null;
+      }
+
+      // Parse JSON fields
+      return {
+        ...metadata,
+        genres: metadata.genres ? JSON.parse(metadata.genres) : [],
+        contentRatings: metadata.contentRatings ? JSON.parse(metadata.contentRatings) : [],
+        networks: metadata.networks ? JSON.parse(metadata.networks) : [],
+        productionCompanies: metadata.productionCompanies ? JSON.parse(metadata.productionCompanies) : [],
+        trailers: metadata.trailers ? JSON.parse(metadata.trailers) : [],
+        seasons: metadata.seasons ? JSON.parse(metadata.seasons) : [],
+        productionCountries: metadata.productionCountries ? JSON.parse(metadata.productionCountries) : [],
+        spokenLanguages: metadata.spokenLanguages ? JSON.parse(metadata.spokenLanguages) : [],
+        originCountry: metadata.originCountry ? JSON.parse(metadata.originCountry) : [],
+      };
+    }),
+
+  /**
+   * Get all available providers for a media item.
+   * 
+   * Returns a list of providers that have cached metadata for this item.
+   */
+  getAvailableProviders: protectedProcedure
+    .input(
+      z.object({
+        type: z.enum(['movie', 'show']),
+        itemId: idSchema,
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const metadata = await ctx.db.query.providerMetadata.findMany({
+        where: and(
+          eq(providerMetadata.mediaType, input.type),
+          eq(providerMetadata.mediaId, input.itemId)
+        ),
+        columns: {
+          provider: true,
+          title: true,
+          fetchedAt: true,
+        },
+      });
+
+      return metadata.map((m) => ({
+        provider: m.provider,
+        title: m.title,
+        fetchedAt: m.fetchedAt,
+      }));
+    }),
+
+  /**
+   * Get credits from a specific provider.
+   */
+  getProviderCredits: protectedProcedure
+    .input(
+      z.object({
+        type: z.enum(['movie', 'show']),
+        itemId: idSchema,
+        provider: providerSchema,
+        roleType: z.enum(['cast', 'crew']).optional(),
+        limit: z.number().min(1).max(100).default(20),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const whereConditions = [
+        eq(providerCredits.mediaType, input.type),
+        eq(providerCredits.mediaId, input.itemId),
+        eq(providerCredits.provider, input.provider),
+      ];
+
+      if (input.roleType) {
+        whereConditions.push(eq(providerCredits.roleType, input.roleType));
+      }
+
+      const credits = await ctx.db.query.providerCredits.findMany({
+        where: and(...whereConditions),
+        limit: input.limit,
+        orderBy: (credits, { asc }) => [asc(credits.creditOrder)],
+      });
+
+      return credits;
+    }),
+
+  /**
    * Get metadata statistics.
    */
   stats: protectedProcedure
@@ -335,4 +490,5 @@ export const metadataRouter = router({
       };
     }),
 });
+
 

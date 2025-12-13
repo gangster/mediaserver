@@ -73,3 +73,20 @@ export function useMarkMovieUnwatched() {
   return trpc.movies.markUnwatched.useMutation();
 }
 
+/**
+ * Hook for fetching detailed file statistics for a movie.
+ */
+export function useMovieFileStats(id: string, enabled = true) {
+  return trpc.movies.getFileStats.useQuery({ id }, { enabled });
+}
+
+/**
+ * Hook for fetching cast and crew for a movie.
+ */
+export function useMovieCredits(id: string, options?: { maxCast?: number; maxCrew?: number }, enabled = true) {
+  return trpc.movies.getCredits.useQuery(
+    { id, ...options },
+    { enabled: enabled && !!id }
+  );
+}
+

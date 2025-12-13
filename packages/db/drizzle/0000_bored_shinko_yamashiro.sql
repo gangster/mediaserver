@@ -21,17 +21,28 @@ CREATE TABLE `audit_logs` (
 --> statement-breakpoint
 CREATE TABLE `background_jobs` (
 	`id` text PRIMARY KEY NOT NULL,
+	`queue` text DEFAULT 'default' NOT NULL,
 	`type` text NOT NULL,
-	`status` text DEFAULT 'pending' NOT NULL,
+	`status` text DEFAULT 'waiting' NOT NULL,
+	`priority` integer DEFAULT 0,
 	`target_type` text,
 	`target_id` text,
+	`target_name` text,
 	`progress` real DEFAULT 0,
 	`progress_message` text,
+	`total_items` integer,
+	`processed_items` integer DEFAULT 0,
+	`data` text,
 	`result` text,
 	`error` text,
+	`stack_trace` text,
+	`attempts_made` integer DEFAULT 0,
+	`max_attempts` integer DEFAULT 3,
+	`parent_job_id` text,
 	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	`started_at` text,
 	`completed_at` text,
+	`duration_ms` integer,
 	`created_by` text,
 	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
 );
@@ -60,6 +71,15 @@ CREATE TABLE `collections` (
 	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
+);
+--> statement-breakpoint
+CREATE TABLE `content_ratings` (
+	`media_type` text NOT NULL,
+	`media_id` text NOT NULL,
+	`country` text NOT NULL,
+	`rating` text NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	PRIMARY KEY(`media_type`, `media_id`, `country`)
 );
 --> statement-breakpoint
 CREATE TABLE `data_deletion_requests` (
@@ -141,6 +161,22 @@ CREATE TABLE `external_request_logs` (
 	`created_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `genres` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tmdb_id` integer,
+	`name` text NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `job_logs` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`job_id` text NOT NULL,
+	`level` text DEFAULT 'info' NOT NULL,
+	`message` text NOT NULL,
+	`data` text,
+	`timestamp` text DEFAULT (datetime('now')) NOT NULL,
+	FOREIGN KEY (`job_id`) REFERENCES `background_jobs`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `libraries` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -192,6 +228,27 @@ CREATE TABLE `metadata_providers` (
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `movie_credits` (
+	`id` text PRIMARY KEY NOT NULL,
+	`movie_id` text NOT NULL,
+	`person_id` text NOT NULL,
+	`role_type` text NOT NULL,
+	`character` text,
+	`department` text,
+	`job` text,
+	`credit_order` integer,
+	FOREIGN KEY (`movie_id`) REFERENCES `movies`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`person_id`) REFERENCES `people`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `movie_genres` (
+	`movie_id` text NOT NULL,
+	`genre_id` text NOT NULL,
+	PRIMARY KEY(`movie_id`, `genre_id`),
+	FOREIGN KEY (`movie_id`) REFERENCES `movies`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`genre_id`) REFERENCES `genres`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `movies` (
 	`id` text PRIMARY KEY NOT NULL,
 	`library_id` text NOT NULL,
@@ -225,6 +282,31 @@ CREATE TABLE `movies` (
 	`added_at` text DEFAULT (datetime('now')) NOT NULL,
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`library_id`) REFERENCES `libraries`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `oauth_tokens` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`provider` text NOT NULL,
+	`access_token` text NOT NULL,
+	`refresh_token` text NOT NULL,
+	`expires_at` text NOT NULL,
+	`scope` text,
+	`token_type` text DEFAULT 'Bearer',
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `people` (
+	`id` text PRIMARY KEY NOT NULL,
+	`tmdb_id` integer,
+	`name` text NOT NULL,
+	`profile_path` text,
+	`profile_blurhash` text,
+	`known_for_department` text,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `playback_sessions` (
@@ -268,6 +350,101 @@ CREATE TABLE `provider_configs` (
 	`enabled` integer DEFAULT true NOT NULL,
 	`api_key` text,
 	`config` text,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `provider_credits` (
+	`id` text PRIMARY KEY NOT NULL,
+	`media_type` text NOT NULL,
+	`media_id` text NOT NULL,
+	`provider` text NOT NULL,
+	`role_type` text NOT NULL,
+	`name` text NOT NULL,
+	`external_person_id` text,
+	`profile_path` text,
+	`character` text,
+	`department` text,
+	`job` text,
+	`credit_order` integer
+);
+--> statement-breakpoint
+CREATE TABLE `provider_episodes` (
+	`episode_id` text NOT NULL,
+	`provider` text NOT NULL,
+	`season_number` integer NOT NULL,
+	`episode_number` integer NOT NULL,
+	`title` text,
+	`overview` text,
+	`air_date` text,
+	`runtime` integer,
+	`still_path` text,
+	`vote_average` real,
+	`vote_count` integer,
+	`guest_stars` text,
+	`crew` text,
+	`fetched_at` text DEFAULT (datetime('now')) NOT NULL,
+	PRIMARY KEY(`episode_id`, `provider`)
+);
+--> statement-breakpoint
+CREATE TABLE `provider_metadata` (
+	`media_type` text NOT NULL,
+	`media_id` text NOT NULL,
+	`provider` text NOT NULL,
+	`title` text NOT NULL,
+	`original_title` text,
+	`sort_title` text,
+	`tagline` text,
+	`overview` text,
+	`release_date` text,
+	`last_air_date` text,
+	`runtime` integer,
+	`status` text,
+	`vote_average` real,
+	`vote_count` integer,
+	`popularity` real,
+	`poster_path` text,
+	`backdrop_path` text,
+	`logo_path` text,
+	`genres` text,
+	`content_ratings` text,
+	`networks` text,
+	`production_companies` text,
+	`trailers` text,
+	`seasons` text,
+	`season_count` integer,
+	`episode_count` integer,
+	`homepage` text,
+	`budget` integer,
+	`revenue` integer,
+	`production_countries` text,
+	`spoken_languages` text,
+	`origin_country` text,
+	`original_language` text,
+	`fetched_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	PRIMARY KEY(`media_type`, `media_id`, `provider`)
+);
+--> statement-breakpoint
+CREATE TABLE `provider_seasons` (
+	`season_id` text NOT NULL,
+	`provider` text NOT NULL,
+	`season_number` integer NOT NULL,
+	`name` text,
+	`overview` text,
+	`air_date` text,
+	`poster_path` text,
+	`episode_count` integer,
+	`vote_average` real,
+	`fetched_at` text DEFAULT (datetime('now')) NOT NULL,
+	PRIMARY KEY(`season_id`, `provider`)
+);
+--> statement-breakpoint
+CREATE TABLE `queue_metrics` (
+	`queue` text PRIMARY KEY NOT NULL,
+	`completed_count` integer DEFAULT 0,
+	`failed_count` integer DEFAULT 0,
+	`avg_duration_ms` integer DEFAULT 0,
+	`last_job_at` text,
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
@@ -325,12 +502,50 @@ CREATE TABLE `settings` (
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE `show_credits` (
+	`id` text PRIMARY KEY NOT NULL,
+	`show_id` text NOT NULL,
+	`person_id` text NOT NULL,
+	`role_type` text NOT NULL,
+	`character` text,
+	`department` text,
+	`job` text,
+	`credit_order` integer,
+	FOREIGN KEY (`show_id`) REFERENCES `tv_shows`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`person_id`) REFERENCES `people`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `show_genres` (
+	`show_id` text NOT NULL,
+	`genre_id` text NOT NULL,
+	PRIMARY KEY(`show_id`, `genre_id`),
+	FOREIGN KEY (`show_id`) REFERENCES `tv_shows`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`genre_id`) REFERENCES `genres`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `system_provider_defaults` (
 	`id` text PRIMARY KEY DEFAULT 'default' NOT NULL,
-	`primary_provider` text DEFAULT 'tmdb' NOT NULL,
+	`primary_provider` text DEFAULT 'tmdb',
+	`primary_movie_provider` text DEFAULT 'tmdb' NOT NULL,
+	`primary_tv_provider` text DEFAULT 'tmdb' NOT NULL,
+	`display_movie_provider` text DEFAULT 'tmdb' NOT NULL,
+	`display_tv_provider` text DEFAULT 'tmdb' NOT NULL,
 	`enabled_rating_sources` text DEFAULT '["imdb", "rt_critics"]' NOT NULL,
 	`rating_source_order` text,
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `trailers` (
+	`id` text PRIMARY KEY NOT NULL,
+	`media_type` text NOT NULL,
+	`media_id` text NOT NULL,
+	`name` text,
+	`site` text NOT NULL,
+	`video_key` text NOT NULL,
+	`type` text,
+	`official` integer DEFAULT true,
+	`published_at` text,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `transcode_jobs` (
@@ -366,6 +581,7 @@ CREATE TABLE `tv_shows` (
 	`last_air_date` text,
 	`status` text,
 	`network` text,
+	`network_logo_path` text,
 	`content_rating` text,
 	`vote_average` real,
 	`vote_count` integer,
@@ -398,6 +614,8 @@ CREATE TABLE `user_invitations` (
 CREATE TABLE `user_provider_preferences` (
 	`user_id` text PRIMARY KEY NOT NULL,
 	`primary_provider` text,
+	`display_movie_provider` text,
+	`display_tv_provider` text,
 	`enabled_rating_sources` text,
 	`rating_source_order` text,
 	`trakt_sync_enabled` integer DEFAULT false,
@@ -442,7 +660,11 @@ CREATE TABLE `watch_progress` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `episodes_file_path_unique` ON `episodes` (`file_path`);--> statement-breakpoint
+CREATE UNIQUE INDEX `genres_tmdb_id_unique` ON `genres` (`tmdb_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `genres_name_unique` ON `genres` (`name`);--> statement-breakpoint
 CREATE UNIQUE INDEX `movies_file_path_unique` ON `movies` (`file_path`);--> statement-breakpoint
+CREATE INDEX `oauth_tokens_user_provider_idx` ON `oauth_tokens` (`user_id`,`provider`);--> statement-breakpoint
+CREATE UNIQUE INDEX `people_tmdb_id_unique` ON `people` (`tmdb_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `tv_shows_folder_path_unique` ON `tv_shows` (`folder_path`);--> statement-breakpoint
 CREATE UNIQUE INDEX `user_invitations_invite_code_unique` ON `user_invitations` (`invite_code`);--> statement-breakpoint
 CREATE UNIQUE INDEX `users_email_unique` ON `users` (`email`);

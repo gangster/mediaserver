@@ -11,6 +11,7 @@
 import { useState, useCallback } from 'react';
 import { View, Text, Pressable, Image, useWindowDimensions } from 'react-native';
 import { Link } from 'expo-router';
+import { getApiUrl } from '../../lib/config';
 
 /** Media item for banner */
 export interface BannerItem {
@@ -76,7 +77,7 @@ export function WebHeroBanner({
   onPlay,
   onMoreInfo,
   variant = 'full',
-  imageBaseUrl = 'http://localhost:3000/api/images',
+  imageBaseUrl = getApiUrl('/api/images'),
 }: WebHeroBannerProps) {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);

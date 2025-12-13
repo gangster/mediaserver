@@ -11,7 +11,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { trpcServer } from '@hono/trpc-server';
 import { loadEnv } from '@mediaserver/config';
-import { createDatabaseFromEnv, runMigrationsFromEnv } from '@mediaserver/db';
+import { createDatabaseFromEnv, checkMigrationsStatus } from '@mediaserver/db';
 import { appRouter } from './routers/app.js';
 import { createContext } from './context.js';
 import { healthRouter } from './routes/health.js';
@@ -27,8 +27,25 @@ const env = loadEnv();
 // Create logger
 const log = createLogger(env.LOG_LEVEL);
 
-// Run migrations before creating database connection
-await runMigrationsFromEnv();
+// Check migration status before starting
+const migrationStatus = await checkMigrationsStatus();
+if (!migrationStatus.isUpToDate) {
+  console.error('\n' + '='.repeat(70));
+  console.error('❌ DATABASE MIGRATIONS REQUIRED');
+  console.error('='.repeat(70));
+  console.error('\nThe database is not up to date. Please run migrations first:\n');
+  console.error('  nix develop -c yarn db:migrate\n');
+  if (migrationStatus.pending > 0) {
+    console.error(`Pending migrations: ${migrationStatus.pending}`);
+  }
+  if (!migrationStatus.databaseExists) {
+    console.error('Database file does not exist yet. It will be created during migration.');
+  }
+  console.error('\n' + '='.repeat(70) + '\n');
+  process.exit(1);
+}
+
+log.info('✅ Database migrations are up to date');
 
 // Create database connection
 const db = createDatabaseFromEnv();

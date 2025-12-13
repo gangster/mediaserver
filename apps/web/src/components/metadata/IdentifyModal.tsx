@@ -12,6 +12,7 @@ import {
   type UseMetadataSearchOptions,
 } from '@mediaserver/api-client';
 import { useDebounce } from '../../hooks/useDebounce';
+import { getImageUrl } from '../../lib/config';
 
 interface IdentifyModalProps {
   isOpen: boolean;
@@ -38,7 +39,6 @@ interface SearchResult {
   confidence: number;
 }
 
-const SERVER_URL = 'http://localhost:3000';
 
 export function IdentifyModal({ isOpen, onClose, item, onIdentified }: IdentifyModalProps) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -205,7 +205,7 @@ export function IdentifyModal({ isOpen, onClose, item, onIdentified }: IdentifyM
               {result.posterPath ? (
                 <Image
                   source={{
-                    uri: `${SERVER_URL}/api/images/poster/${result.posterPath.replace('/', '')}?size=small`,
+                    uri: getImageUrl(`/poster/${result.posterPath.replace('/', '')}`, 'small'),
                   }}
                   style={{ width: 80, height: 120 }}
                 />
@@ -266,4 +266,5 @@ export function IdentifyModal({ isOpen, onClose, item, onIdentified }: IdentifyM
     </View>
   );
 }
+
 

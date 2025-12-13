@@ -29,6 +29,7 @@ export {
 export {
   MetadataManager,
   createDefaultMetadataSettings,
+  type MultiProviderMetadataResult,
 } from './manager.js';
 
 // Integrations
@@ -58,4 +59,5 @@ export {
   type TraktUserCredentials,
   type TraktHistoryItem,
 } from './integrations/index.js';
+
 

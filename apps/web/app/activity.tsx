@@ -20,7 +20,7 @@ import {
 } from '@mediaserver/api-client';
 
 type JobStatus = 'waiting' | 'active' | 'completed' | 'failed' | 'delayed' | 'paused';
-type JobType = 'scan' | 'metadata_refresh' | 'metadata_identify' | 'transcode' | 'thumbnail' | 'cleanup';
+type JobType = 'scan' | 'scan_library' | 'scan_file' | 'metadata_refresh' | 'metadata_identify' | 'transcode' | 'thumbnail' | 'cleanup' | 'refresh_movie' | 'refresh_show' | 'refresh_library' | 'identify_media';
 
 interface Job {
   id: string;
@@ -59,11 +59,17 @@ const STATUS_LABELS: Record<JobStatus, string> = {
 
 const TYPE_LABELS: Record<JobType, string> = {
   scan: 'Library Scan',
+  scan_library: 'Library Scan',
+  scan_file: 'File Scan',
   metadata_refresh: 'Metadata Refresh',
   metadata_identify: 'Identify Media',
   transcode: 'Transcode',
   thumbnail: 'Thumbnail',
   cleanup: 'Cleanup',
+  refresh_movie: 'Refresh Movie',
+  refresh_show: 'Refresh Show',
+  refresh_library: 'Refresh Library',
+  identify_media: 'Identify Media',
 };
 
 function formatDuration(ms: number): string {
@@ -532,4 +538,5 @@ export default function ActivityPage() {
     </Layout>
   );
 }
+
 

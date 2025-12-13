@@ -46,6 +46,8 @@ async function testIntegrationWithKey(
     
     // Initialize with the provided API key
     await integration.initialize({
+      id: integrationId,
+      name: integration.name,
       apiKey,
       enabled: true,
       options: {},
@@ -380,8 +382,9 @@ export const integrationsRouter = router({
 
   /**
    * Get rating sources configuration.
+   * Available to all authenticated users so they see filtered ratings.
    */
-  getRatingSources: adminProcedure.query(async ({ ctx }) => {
+  getRatingSources: protectedProcedure.query(async ({ ctx }) => {
     const defaults = await ctx.db.query.systemProviderDefaults.findFirst();
 
     return {

@@ -25,6 +25,7 @@ import { StatCard } from '../src/components/home';
 import { HomeSettingsPanel, HomeSettingsButton } from '../src/components/home';
 import { WebMediaRow, WebHeroBanner, type BannerItem } from '../src/components/media';
 import { Button, ButtonText, Spinner } from '../src/components/ui';
+import { getApiUrl } from '../src/lib/config';
 import type { MediaRowItem } from '@mediaserver/ui';
 
 /**
@@ -37,7 +38,10 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
-const IMAGE_BASE_URL = 'http://localhost:3000/api/images';
+/** Get image base URL (lazy to ensure window is available) */
+function getImageBaseUrl(): string {
+  return getApiUrl('/api/images');
+}
 
 /**
  * Convert movie to MediaRowItem
@@ -56,7 +60,7 @@ function movieToRowItem(movie: {
     title: movie.title,
     year: movie.year,
     // Use proper image proxy URL with movie ID
-    posterPath: movie.posterPath ? `${IMAGE_BASE_URL}/movies/${movie.id}/poster?size=medium` : null,
+    posterPath: movie.posterPath ? `${getImageBaseUrl()}/movies/${movie.id}/poster?size=medium` : null,
     rating: movie.voteAverage,
   };
 }
@@ -78,7 +82,7 @@ function showToRowItem(show: {
     title: show.title,
     year: show.year,
     // Use proper image proxy URL with show ID
-    posterPath: show.posterPath ? `${IMAGE_BASE_URL}/shows/${show.id}/poster?size=medium` : null,
+    posterPath: show.posterPath ? `${getImageBaseUrl()}/shows/${show.id}/poster?size=medium` : null,
     rating: show.voteAverage,
   };
 }
@@ -507,26 +511,6 @@ export default function WebHomeScreen() {
             </View>
           )}
 
-          {/* Admin quick actions */}
-          {isAdmin && (libraries?.length ?? 0) > 0 && (
-            <View className="px-4 sm:px-6 lg:px-8 pb-8">
-              <Text className="text-xl font-semibold text-white mb-4">
-                Quick Actions
-              </Text>
-              <View className="flex flex-row flex-wrap gap-3">
-                <Link href="/libraries" asChild>
-                  <Button action="secondary" variant="outline" size="md">
-                    <ButtonText>Manage Libraries</ButtonText>
-                  </Button>
-                </Link>
-                <Link href="/settings" asChild>
-                  <Button action="secondary" variant="outline" size="md">
-                    <ButtonText>Settings</ButtonText>
-                  </Button>
-                </Link>
-              </View>
-            </View>
-          )}
         </View>
       </ScrollView>
 

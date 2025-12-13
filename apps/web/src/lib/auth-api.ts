@@ -5,7 +5,12 @@
  * Separate from tRPC for simpler auth flow handling.
  */
 
-const API_URL = 'http://localhost:3000/api';
+import { getApiUrl } from './config';
+
+/** Get the API URL (lazy evaluation to ensure window is available) */
+function getAuthApiUrl(): string {
+  return getApiUrl('/api');
+}
 
 /** Auth tokens */
 export interface AuthTokens {
@@ -66,8 +71,8 @@ async function authRequest<T>(
   }
 
   const url = method === 'GET' && body
-    ? `${API_URL}/auth.${procedure}?input=${encodeURIComponent(JSON.stringify({ json: body }))}`
-    : `${API_URL}/auth.${procedure}`;
+    ? `${getAuthApiUrl()}/auth.${procedure}?input=${encodeURIComponent(JSON.stringify({ json: body }))}`
+    : `${getAuthApiUrl()}/auth.${procedure}`;
 
   // #region agent log
   console.log('[DEBUG H1] Fetching', { url });
@@ -113,7 +118,7 @@ export const authApi = {
    * Check if setup is required (no users exist)
    */
   needsSetup: () =>
-    fetch(`${API_URL}/setup.status?batch=1&input=${encodeURIComponent(JSON.stringify({ '0': { json: null, meta: { values: ['undefined'], v: 1 } } }))}`)
+    fetch(`${getAuthApiUrl()}/setup.status?batch=1&input=${encodeURIComponent(JSON.stringify({ '0': { json: null, meta: { values: ['undefined'], v: 1 } } }))}`)
       .then(res => res.json())
       .then(data => ({
         needsSetup: !data[0]?.result?.data?.json?.isComplete,
@@ -150,7 +155,7 @@ export const authApi = {
   me: (accessToken: string) => {
     // tRPC GET requests need input parameter - for no input, use empty object encoded
     const input = encodeURIComponent(JSON.stringify({ '0': { json: null, meta: { values: ['undefined'], v: 1 } } }));
-    return fetch(`${API_URL}/user.me?batch=1&input=${input}`, {
+    return fetch(`${getAuthApiUrl()}/user.me?batch=1&input=${input}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
       .then(res => {
@@ -173,3 +178,4 @@ export const authApi = {
       });
   },
 };
+

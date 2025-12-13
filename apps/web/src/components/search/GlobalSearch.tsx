@@ -9,6 +9,7 @@ import { View, Text, Pressable, TextInput, Image, ScrollView, useWindowDimension
 import { useRouter } from 'expo-router';
 import { useSearch } from '@mediaserver/api-client';
 import { useDebounce } from '../../hooks';
+import { getMediaImageUrl } from '../../lib/config';
 
 /** Breakpoint for showing keyboard hints */
 const SM_BREAKPOINT = 640;
@@ -40,10 +41,10 @@ function getImageUrl(result: SearchResult): string {
   }
   // For episodes, use the showId to fetch the show's poster
   if (result.type === 'episode' && result.showId) {
-    return `http://localhost:3000/api/images/shows/${result.showId}/poster?size=small`;
+    return getMediaImageUrl('shows', result.showId, 'poster', 'small');
   }
-  const endpoint = result.type === 'movie' ? 'movies' : 'shows';
-  return `http://localhost:3000/api/images/${endpoint}/${result.id}/poster?size=small`;
+  const mediaType = result.type === 'movie' ? 'movies' : 'shows';
+  return getMediaImageUrl(mediaType, result.id, 'poster', 'small');
 }
 
 /**
@@ -536,3 +537,4 @@ export function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
 }
 
 export default GlobalSearch;
+

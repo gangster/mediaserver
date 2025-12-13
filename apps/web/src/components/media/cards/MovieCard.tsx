@@ -11,6 +11,7 @@ import { View, Text, Pressable, Image, type ViewStyle } from 'react-native';
 import { Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { usePreferencesStore } from '../../../stores/preferences';
+import { getMediaImageUrl } from '../../../lib/config';
 
 /** Movie item data */
 export interface MovieItem {
@@ -48,7 +49,7 @@ function getImageUrl(
   itemId: string
 ): string {
   if (!path) return '';
-  return `http://localhost:3000/api/images/movies/${itemId}/${type}?size=medium`;
+  return getMediaImageUrl('movies', itemId, type, 'medium');
 }
 
 /** Format runtime to human readable */
@@ -163,17 +164,49 @@ function ImagePlaceholder({ title, variant }: { title: string; variant: 'poster'
   );
 }
 
+/** Loading skeleton for images */
+function ImageSkeleton() {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: '#27272a',
+      }}
+    >
+      {/* Animated shimmer effect using web styles */}
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.05) 50%, transparent 100%)',
+          animation: 'shimmer 1.5s infinite',
+        } as ViewStyle}
+      />
+    </View>
+  );
+}
+
 /** Poster variant card */
 function PosterCard({
   item,
   onClick,
   showMetadata,
+  priority: _priority = false,
 }: {
   item: MovieItem;
   onClick?: (item: MovieItem) => void;
   showMetadata?: boolean;
+  priority?: boolean;
 }) {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const { showRatings, showProgress, reduceMotion } = usePreferencesStore();
 
@@ -187,12 +220,24 @@ function PosterCard({
     if (onClick) onClick(item);
   }, [onClick, item]);
 
-  const cardStyle: ViewStyle = {
-    transform: [{ scale: isHovered && !reduceMotion ? 1.05 : 1 }],
-  };
+  const handleImageLoad = useCallback(() => {
+    setImageLoaded(true);
+  }, []);
+
+  const handleImageError = useCallback(() => {
+    setImageError(true);
+  }, []);
 
   const content = (
-    <View style={cardStyle}>
+    <View
+      style={{
+        transform: [{ scale: isHovered && !reduceMotion ? 1.03 : 1 }],
+        transitionProperty: 'transform',
+        transitionDuration: '250ms',
+        transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+        willChange: 'transform',
+      } as ViewStyle}
+    >
       {/* Poster image */}
       <View
         style={{
@@ -203,16 +248,23 @@ function PosterCard({
           aspectRatio: 2 / 3,
         }}
       >
-        {/* Placeholder */}
+        {/* Loading skeleton */}
+        {!imageLoaded && hasImage && <ImageSkeleton />}
+
+        {/* Placeholder for missing images */}
         {!hasImage && <ImagePlaceholder title={item.title} variant="poster" />}
 
-        {/* Image */}
+        {/* Image with fade-in */}
         {hasImage && (
           <Image
             source={{ uri: imageUrl }}
-            style={{ width: '100%', height: '100%' }}
+            style={[
+              { width: '100%', height: '100%' },
+              { opacity: imageLoaded ? 1 : 0 },
+            ]}
             resizeMode="cover"
-            onError={() => setImageError(true)}
+            onLoad={handleImageLoad}
+            onError={handleImageError}
           />
         )}
 
@@ -300,12 +352,15 @@ function ThumbCard({
   item,
   onClick,
   showMetadata,
+  priority: _priority = false,
 }: {
   item: MovieItem;
   onClick?: (item: MovieItem) => void;
   showMetadata?: boolean;
+  priority?: boolean;
 }) {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const { showRatings, showProgress, reduceMotion } = usePreferencesStore();
 
@@ -319,12 +374,24 @@ function ThumbCard({
     if (onClick) onClick(item);
   }, [onClick, item]);
 
-  const cardStyle: ViewStyle = {
-    transform: [{ scale: isHovered && !reduceMotion ? 1.05 : 1 }],
-  };
+  const handleImageLoad = useCallback(() => {
+    setImageLoaded(true);
+  }, []);
+
+  const handleImageError = useCallback(() => {
+    setImageError(true);
+  }, []);
 
   const content = (
-    <View style={cardStyle}>
+    <View
+      style={{
+        transform: [{ scale: isHovered && !reduceMotion ? 1.03 : 1 }],
+        transitionProperty: 'transform',
+        transitionDuration: '250ms',
+        transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+        willChange: 'transform',
+      } as ViewStyle}
+    >
       {/* Backdrop image */}
       <View
         style={{
@@ -335,16 +402,23 @@ function ThumbCard({
           aspectRatio: 16 / 9,
         }}
       >
+        {/* Loading skeleton */}
+        {!imageLoaded && hasImage && <ImageSkeleton />}
+
         {/* Placeholder */}
         {!hasImage && <ImagePlaceholder title={item.title} variant="backdrop" />}
 
-        {/* Image */}
+        {/* Image with fade-in */}
         {hasImage && (
           <Image
             source={{ uri: imageUrl }}
-            style={{ width: '100%', height: '100%' }}
+            style={[
+              { width: '100%', height: '100%' },
+              { opacity: imageLoaded ? 1 : 0 },
+            ]}
             resizeMode="cover"
-            onError={() => setImageError(true)}
+            onLoad={handleImageLoad}
+            onError={handleImageError}
           />
         )}
 
@@ -453,11 +527,14 @@ function ThumbCard({
 function ListCard({
   item,
   onClick,
+  priority: _priority = false,
 }: {
   item: MovieItem;
   onClick?: (item: MovieItem) => void;
+  priority?: boolean;
 }) {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const { showRatings, showProgress } = usePreferencesStore();
 
@@ -481,7 +558,10 @@ function ListCard({
         padding: 8,
         borderRadius: 8,
         backgroundColor: isHovered ? 'rgba(39,39,42,0.5)' : 'transparent',
-      }}
+        transitionProperty: 'background-color',
+        transitionDuration: '200ms',
+        transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+      } as ViewStyle}
     >
       {/* Small poster */}
       <View
@@ -494,12 +574,19 @@ function ListCard({
           backgroundColor: '#27272a',
         }}
       >
+        {!imageLoaded && hasImage && (
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#27272a' }} />
+        )}
         {!hasImage && <ImagePlaceholder title={item.title} variant="poster" />}
         {hasImage && (
           <Image
             source={{ uri: imageUrl }}
-            style={{ width: '100%', height: '100%' }}
+            style={[
+              { width: '100%', height: '100%' },
+              { opacity: imageLoaded ? 1 : 0 },
+            ]}
             resizeMode="cover"
+            onLoad={() => setImageLoaded(true)}
             onError={() => setImageError(true)}
           />
         )}
@@ -526,10 +613,16 @@ function ListCard({
               <Text style={{ color: '#a1a1aa', fontSize: 14 }}>{runtime}</Text>
             </>
           )}
-          {item.genres && item.genres.length > 0 && (
+          {item.genres && (Array.isArray(item.genres) ? item.genres.length > 0 : item.genres) && (
             <>
               <Text style={{ color: '#a1a1aa', fontSize: 14 }}>•</Text>
-              <Text style={{ color: '#a1a1aa', fontSize: 14 }}>{item.genres.slice(0, 2).join(', ')}</Text>
+              <Text style={{ color: '#a1a1aa', fontSize: 14 }}>
+                {Array.isArray(item.genres) 
+                  ? item.genres.slice(0, 2).join(', ')
+                  : typeof item.genres === 'string'
+                    ? (() => { try { return JSON.parse(item.genres).slice(0, 2).join(', '); } catch { return item.genres; } })()
+                    : ''}
+              </Text>
             </>
           )}
         </View>
@@ -586,11 +679,14 @@ function ListCard({
 function BannerCard({
   item,
   onClick,
+  priority: _priority = false,
 }: {
   item: MovieItem;
   onClick?: (item: MovieItem) => void;
+  priority?: boolean;
 }) {
   const [imageError, setImageError] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const { showRatings, showProgress, reduceMotion } = usePreferencesStore();
 
@@ -605,12 +701,16 @@ function BannerCard({
     if (onClick) onClick(item);
   }, [onClick, item]);
 
-  const cardStyle: ViewStyle = {
-    transform: [{ scale: isHovered && !reduceMotion ? 1.02 : 1 }],
-  };
-
   const content = (
-    <View style={cardStyle}>
+    <View
+      style={{
+        transform: [{ scale: isHovered && !reduceMotion ? 1.01 : 1 }],
+        transitionProperty: 'transform',
+        transitionDuration: '250ms',
+        transitionTimingFunction: 'cubic-bezier(0.4, 0, 0.2, 1)',
+        willChange: 'transform',
+      } as ViewStyle}
+    >
       <View
         style={{
           position: 'relative',
@@ -620,15 +720,22 @@ function BannerCard({
           aspectRatio: 21 / 9,
         }}
       >
+        {/* Loading skeleton */}
+        {!imageLoaded && hasImage && <ImageSkeleton />}
+
         {/* Placeholder */}
         {!hasImage && <ImagePlaceholder title={item.title} variant="backdrop" />}
 
-        {/* Image */}
+        {/* Image with fade-in */}
         {hasImage && (
           <Image
             source={{ uri: imageUrl }}
-            style={{ width: '100%', height: '100%' }}
+            style={[
+              { width: '100%', height: '100%' },
+              { opacity: imageLoaded ? 1 : 0 },
+            ]}
             resizeMode="cover"
+            onLoad={() => setImageLoaded(true)}
             onError={() => setImageError(true)}
           />
         )}
@@ -754,22 +861,22 @@ function BannerCard({
  *
  * Renders a movie card in the specified variant style.
  */
-export function MovieCard({ item, variant = 'posterCard', onClick }: MovieCardProps) {
+export function MovieCard({ item, variant = 'posterCard', onClick, priority = false }: MovieCardProps) {
   switch (variant) {
     case 'poster':
-      return <PosterCard item={item} onClick={onClick} showMetadata={false} />;
+      return <PosterCard item={item} onClick={onClick} showMetadata={false} priority={priority} />;
     case 'posterCard':
-      return <PosterCard item={item} onClick={onClick} showMetadata={true} />;
+      return <PosterCard item={item} onClick={onClick} showMetadata={true} priority={priority} />;
     case 'thumb':
-      return <ThumbCard item={item} onClick={onClick} showMetadata={false} />;
+      return <ThumbCard item={item} onClick={onClick} showMetadata={false} priority={priority} />;
     case 'thumbCard':
-      return <ThumbCard item={item} onClick={onClick} showMetadata={true} />;
+      return <ThumbCard item={item} onClick={onClick} showMetadata={true} priority={priority} />;
     case 'list':
-      return <ListCard item={item} onClick={onClick} />;
+      return <ListCard item={item} onClick={onClick} priority={priority} />;
     case 'banner':
-      return <BannerCard item={item} onClick={onClick} />;
+      return <BannerCard item={item} onClick={onClick} priority={priority} />;
     default:
-      return <PosterCard item={item} onClick={onClick} showMetadata={true} />;
+      return <PosterCard item={item} onClick={onClick} showMetadata={true} priority={priority} />;
   }
 }
 

@@ -60,3 +60,50 @@ export function useMetadataStats(libraryId?: string) {
   return trpc.metadata.stats.useQuery({ libraryId });
 }
 
+/** Provider type */
+export type MetadataProvider = 'tmdb' | 'tvdb' | 'anidb' | 'anilist' | 'mal' | 'omdb' | 'trakt';
+
+/**
+ * Hook for fetching available metadata providers for a media item.
+ * Returns the list of providers that have cached metadata.
+ */
+export function useAvailableProviders(type: 'movie' | 'show', itemId: string, enabled = true) {
+  return trpc.metadata.getAvailableProviders.useQuery(
+    { type, itemId },
+    { enabled: enabled && !!itemId }
+  );
+}
+
+/**
+ * Hook for fetching metadata from a specific provider.
+ * Returns the cached metadata from the provider_metadata table.
+ */
+export function useProviderMetadata(
+  type: 'movie' | 'show',
+  itemId: string,
+  provider: MetadataProvider,
+  enabled = true
+) {
+  return trpc.metadata.getProviderMetadata.useQuery(
+    { type, itemId, provider },
+    { enabled: enabled && !!itemId && !!provider }
+  );
+}
+
+/**
+ * Hook for fetching credits from a specific provider.
+ */
+export function useProviderCredits(
+  type: 'movie' | 'show',
+  itemId: string,
+  provider: MetadataProvider,
+  options?: { roleType?: 'cast' | 'crew'; limit?: number },
+  enabled = true
+) {
+  return trpc.metadata.getProviderCredits.useQuery(
+    { type, itemId, provider, ...options },
+    { enabled: enabled && !!itemId && !!provider }
+  );
+}
+
+

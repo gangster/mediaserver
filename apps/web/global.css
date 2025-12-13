@@ -107,6 +107,24 @@ body {
   }
 }
 
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 @layer utilities {
   .animate-fade-in {
     animation: fade-in 0.2s ease-out;
@@ -116,6 +134,12 @@ body {
   }
   .animate-slide-down {
     animation: slide-down 0.3s ease-out;
+  }
+  .animate-shimmer {
+    animation: shimmer 1.5s infinite;
+  }
+  .animate-pulse-custom {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 }
 

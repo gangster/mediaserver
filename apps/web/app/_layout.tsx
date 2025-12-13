@@ -11,6 +11,7 @@ import { ApiProvider, useSetupStatus } from '@mediaserver/api-client';
 import { useAuth } from '../src/hooks/useAuth';
 import { getAccessToken, handleAuthError } from '../src/stores/auth';
 import { GluestackUIProvider } from '../src/components/ui/gluestack-ui-provider';
+import { getApiBaseUrl } from '../src/lib/config';
 
 import '../global.css';
 
@@ -59,7 +60,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 export default function RootLayout() {
   // Memoize config to prevent unnecessary re-renders
   const apiConfig = useMemo(() => ({
-    baseUrl: 'http://localhost:3000',
+    baseUrl: getApiBaseUrl(),
     getToken: getAccessToken,
     onAuthError: handleAuthError,
   }), []);

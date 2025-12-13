@@ -26,8 +26,28 @@ import type {
   Artwork,
   AggregateRatings,
   MatchResult,
+  ExternalIds,
 } from './types.js';
 import { scoreSearchResults, findBestMatch, DEFAULT_MATCHER_CONFIG } from './matcher.js';
+
+/**
+ * Result from fetching metadata from all providers.
+ * Contains metadata keyed by provider ID.
+ */
+export interface MultiProviderMetadataResult<T> {
+  /** The best match found during search */
+  match: ScoredSearchResult | null;
+  /** Metadata from each provider that successfully returned data */
+  providerData: Record<string, T>;
+  /** Artwork from Fanart.tv (if enabled) */
+  artwork: Artwork | null;
+  /** Aggregate ratings from MDBList (if enabled) */
+  ratings: AggregateRatings | null;
+  /** Overall match result */
+  result: MatchResult;
+  /** External IDs collected from all providers */
+  externalIds: ExternalIds;
+}
 
 /**
  * MetadataManager manages all metadata integrations and coordinates
@@ -336,8 +356,9 @@ export class MetadataManager {
    * Orchestrate complete movie metadata fetch
    * 1. Search and match
    * 2. Fetch full details
-   * 3. Fetch artwork (if enabled)
-   * 4. Fetch ratings (if enabled)
+   * 3. Supplement missing metadata from fallback providers
+   * 4. Fetch artwork (if enabled)
+   * 5. Fetch ratings (if enabled)
    */
   async fetchCompleteMovieMetadata(
     title: string,
@@ -370,7 +391,7 @@ export class MetadataManager {
     usedIntegrations.push(match.integration);
 
     // Step 2: Fetch full details
-    const details = await this.fetchMovieDetails(
+    let details = await this.fetchMovieDetails(
       match.integration,
       match.integrationId
     );
@@ -390,7 +411,10 @@ export class MetadataManager {
       };
     }
 
-    // Step 3: Fetch artwork
+    // Step 3: Supplement missing metadata from fallback providers
+    details = await this.supplementMovieDetails(details, match.integration, usedIntegrations);
+
+    // Step 4: Fetch artwork
     let artwork: Artwork | null = null;
     if (details.externalIds.tmdb) {
       artwork = await this.fetchMovieArtwork(details.externalIds.tmdb);
@@ -402,7 +426,7 @@ export class MetadataManager {
       }
     }
 
-    // Step 4: Fetch ratings
+    // Step 5: Fetch ratings
     let ratings: AggregateRatings | null = null;
     if (details.externalIds.imdb) {
       ratings = await this.fetchMovieRatings(details.externalIds.imdb);
@@ -425,6 +449,491 @@ export class MetadataManager {
         integrations: usedIntegrations,
       },
     };
+  }
+
+  /**
+   * Fetch movie metadata from ALL configured providers.
+   * 
+   * This is the new multi-provider approach that caches metadata from every
+   * enabled provider, enabling instant provider switching in the UI.
+   * 
+   * Flow:
+   * 1. Search and find best match to get initial external IDs
+   * 2. Fetch details from ALL providers in parallel using cross-referenced IDs
+   * 3. Merge external IDs from all providers to build complete ID map
+   * 4. Fetch artwork and ratings
+   * 
+   * @param title Movie title to search for
+   * @param year Optional release year for better matching
+   * @returns Metadata from all providers that successfully returned data
+   */
+  async fetchAllMovieProviderMetadata(
+    title: string,
+    year?: number
+  ): Promise<MultiProviderMetadataResult<MovieDetails>> {
+    const usedIntegrations: string[] = [];
+
+    // Step 1: Find best match to get initial external IDs
+    const match = await this.findBestMovieMatch(title, year);
+    if (!match) {
+      return {
+        match: null,
+        providerData: {},
+        artwork: null,
+        ratings: null,
+        externalIds: {},
+        result: {
+          matched: false,
+          confidence: 0,
+          integrations: [],
+        },
+      };
+    }
+
+    usedIntegrations.push(match.integration);
+
+    // Step 2: Fetch initial details from the matched provider to get external IDs
+    const initialDetails = await this.fetchMovieDetails(
+      match.integration,
+      match.integrationId
+    );
+
+    if (!initialDetails) {
+      return {
+        match,
+        providerData: {},
+        artwork: null,
+        ratings: null,
+        externalIds: {},
+        result: {
+          matched: false,
+          confidence: match.confidence,
+          integrations: usedIntegrations,
+          error: 'Failed to fetch initial movie details',
+        },
+      };
+    }
+
+    // Build initial external IDs from the matched provider
+    let externalIds: ExternalIds = { ...initialDetails.externalIds };
+    
+    // Store all provider data keyed by provider ID
+    const providerData: Record<string, MovieDetails> = {
+      [match.integration]: initialDetails,
+    };
+
+    // Step 3: Fetch from ALL other enabled providers in parallel
+    const otherProviders = this.settings.movieIntegrations.filter(
+      (id) => id !== match.integration && this.isIntegrationReady(id)
+    );
+
+    const fetchPromises = otherProviders.map(async (integrationId) => {
+      const integration = this.getIntegration<MetadataIntegration>(integrationId);
+      if (!integration || !isMetadataIntegration(integration)) {
+        return { integrationId, details: null };
+      }
+
+      try {
+        // Try to find external ID for this provider
+        const externalId = this.getMovieExternalIdForIntegration(externalIds, integrationId);
+        if (!externalId) {
+          return { integrationId, details: null };
+        }
+
+        const details = await integration.getMovieDetails(externalId);
+        return { integrationId, details };
+      } catch (error) {
+        console.error(`Error fetching movie metadata from ${integrationId}:`, error);
+        return { integrationId, details: null };
+      }
+    });
+
+    const results = await Promise.all(fetchPromises);
+
+    // Process results and merge external IDs
+    for (const { integrationId, details } of results) {
+      if (details) {
+        providerData[integrationId] = details;
+        usedIntegrations.push(integrationId);
+
+        // Merge external IDs from this provider
+        externalIds = this.mergeExternalIds(externalIds, details.externalIds);
+      }
+    }
+
+    // Step 4: Now that we have more external IDs, try fetching from providers we might have missed
+    const missingProviders = this.settings.movieIntegrations.filter(
+      (id) => !providerData[id] && this.isIntegrationReady(id)
+    );
+
+    if (missingProviders.length > 0) {
+      const secondPassPromises = missingProviders.map(async (integrationId) => {
+        const integration = this.getIntegration<MetadataIntegration>(integrationId);
+        if (!integration || !isMetadataIntegration(integration)) {
+          return { integrationId, details: null };
+        }
+
+        try {
+          const externalId = this.getMovieExternalIdForIntegration(externalIds, integrationId);
+          if (!externalId) {
+            return { integrationId, details: null };
+          }
+
+          const details = await integration.getMovieDetails(externalId);
+          return { integrationId, details };
+        } catch (error) {
+          console.error(`Error fetching movie metadata from ${integrationId} (second pass):`, error);
+          return { integrationId, details: null };
+        }
+      });
+
+      const secondPassResults = await Promise.all(secondPassPromises);
+
+      for (const { integrationId, details } of secondPassResults) {
+        if (details) {
+          providerData[integrationId] = details;
+          usedIntegrations.push(integrationId);
+          externalIds = this.mergeExternalIds(externalIds, details.externalIds);
+        }
+      }
+    }
+
+    // Step 5: Fetch artwork (if enabled)
+    let artwork: Artwork | null = null;
+    if (externalIds.tmdb) {
+      artwork = await this.fetchMovieArtwork(externalIds.tmdb);
+      if (artwork) {
+        const artworkIntegration = this.getArtworkIntegration();
+        if (artworkIntegration) {
+          usedIntegrations.push(artworkIntegration.id);
+        }
+      }
+    }
+
+    // Step 6: Fetch ratings (if enabled)
+    let ratings: AggregateRatings | null = null;
+    if (externalIds.imdb) {
+      ratings = await this.fetchMovieRatings(externalIds.imdb);
+      if (ratings) {
+        const ratingsIntegration = this.getRatingsIntegration();
+        if (ratingsIntegration) {
+          usedIntegrations.push(ratingsIntegration.id);
+        }
+      }
+    }
+
+    return {
+      match,
+      providerData,
+      artwork,
+      ratings,
+      externalIds,
+      result: {
+        matched: true,
+        confidence: match.confidence,
+        integrations: [...new Set(usedIntegrations)], // Dedupe
+      },
+    };
+  }
+
+  /**
+   * Fetch show metadata from ALL configured providers.
+   * 
+   * This is the new multi-provider approach that caches metadata from every
+   * enabled provider, enabling instant provider switching in the UI.
+   */
+  async fetchAllShowProviderMetadata(
+    title: string,
+    year?: number
+  ): Promise<MultiProviderMetadataResult<ShowDetails>> {
+    const usedIntegrations: string[] = [];
+
+    // Step 1: Find best match to get initial external IDs
+    const match = await this.findBestShowMatch(title, year);
+    if (!match) {
+      return {
+        match: null,
+        providerData: {},
+        artwork: null,
+        ratings: null,
+        externalIds: {},
+        result: {
+          matched: false,
+          confidence: 0,
+          integrations: [],
+        },
+      };
+    }
+
+    usedIntegrations.push(match.integration);
+
+    // Step 2: Fetch initial details from the matched provider
+    const initialDetails = await this.fetchShowDetails(
+      match.integration,
+      match.integrationId
+    );
+
+    if (!initialDetails) {
+      return {
+        match,
+        providerData: {},
+        artwork: null,
+        ratings: null,
+        externalIds: {},
+        result: {
+          matched: false,
+          confidence: match.confidence,
+          integrations: usedIntegrations,
+          error: 'Failed to fetch initial show details',
+        },
+      };
+    }
+
+    // Build initial external IDs
+    let externalIds: ExternalIds = { ...initialDetails.externalIds };
+    
+    const providerData: Record<string, ShowDetails> = {
+      [match.integration]: initialDetails,
+    };
+
+    // Step 3: Fetch from ALL other enabled providers in parallel
+    const otherProviders = this.settings.tvIntegrations.filter(
+      (id) => id !== match.integration && this.isIntegrationReady(id)
+    );
+
+    const fetchPromises = otherProviders.map(async (integrationId) => {
+      const integration = this.getIntegration<MetadataIntegration>(integrationId);
+      if (!integration || !isMetadataIntegration(integration)) {
+        return { integrationId, details: null };
+      }
+
+      try {
+        const externalId = this.getExternalIdForIntegration(externalIds, integrationId);
+        if (!externalId) {
+          return { integrationId, details: null };
+        }
+
+        const details = await integration.getShowDetails(externalId);
+        return { integrationId, details };
+      } catch (error) {
+        console.error(`Error fetching show metadata from ${integrationId}:`, error);
+        return { integrationId, details: null };
+      }
+    });
+
+    const results = await Promise.all(fetchPromises);
+
+    for (const { integrationId, details } of results) {
+      if (details) {
+        providerData[integrationId] = details;
+        usedIntegrations.push(integrationId);
+        externalIds = this.mergeExternalIds(externalIds, details.externalIds);
+      }
+    }
+
+    // Step 4: Second pass for providers we might have missed
+    const missingProviders = this.settings.tvIntegrations.filter(
+      (id) => !providerData[id] && this.isIntegrationReady(id)
+    );
+
+    if (missingProviders.length > 0) {
+      const secondPassPromises = missingProviders.map(async (integrationId) => {
+        const integration = this.getIntegration<MetadataIntegration>(integrationId);
+        if (!integration || !isMetadataIntegration(integration)) {
+          return { integrationId, details: null };
+        }
+
+        try {
+          const externalId = this.getExternalIdForIntegration(externalIds, integrationId);
+          if (!externalId) {
+            return { integrationId, details: null };
+          }
+
+          const details = await integration.getShowDetails(externalId);
+          return { integrationId, details };
+        } catch (error) {
+          console.error(`Error fetching show metadata from ${integrationId} (second pass):`, error);
+          return { integrationId, details: null };
+        }
+      });
+
+      const secondPassResults = await Promise.all(secondPassPromises);
+
+      for (const { integrationId, details } of secondPassResults) {
+        if (details) {
+          providerData[integrationId] = details;
+          usedIntegrations.push(integrationId);
+          externalIds = this.mergeExternalIds(externalIds, details.externalIds);
+        }
+      }
+    }
+
+    // Step 5: Fetch artwork (prefer TVDB for shows)
+    let artwork: Artwork | null = null;
+    if (externalIds.tvdb) {
+      artwork = await this.fetchShowArtwork(externalIds.tvdb);
+      if (artwork) {
+        const artworkIntegration = this.getArtworkIntegration();
+        if (artworkIntegration) {
+          usedIntegrations.push(artworkIntegration.id);
+        }
+      }
+    }
+
+    // Step 6: Fetch ratings
+    let ratings: AggregateRatings | null = null;
+    if (externalIds.imdb) {
+      ratings = await this.fetchShowRatings(externalIds.imdb);
+      if (ratings) {
+        const ratingsIntegration = this.getRatingsIntegration();
+        if (ratingsIntegration) {
+          usedIntegrations.push(ratingsIntegration.id);
+        }
+      }
+    }
+
+    return {
+      match,
+      providerData,
+      artwork,
+      ratings,
+      externalIds,
+      result: {
+        matched: true,
+        confidence: match.confidence,
+        integrations: [...new Set(usedIntegrations)],
+      },
+    };
+  }
+
+  /**
+   * Merge external IDs from multiple sources.
+   * Prefers non-null values and keeps existing values if new ones are null.
+   */
+  private mergeExternalIds(existing: ExternalIds, incoming: ExternalIds): ExternalIds {
+    return {
+      tmdb: incoming.tmdb ?? existing.tmdb,
+      tvdb: incoming.tvdb ?? existing.tvdb,
+      imdb: incoming.imdb ?? existing.imdb,
+      anidb: incoming.anidb ?? existing.anidb,
+      anilist: incoming.anilist ?? existing.anilist,
+      mal: incoming.mal ?? existing.mal,
+      trakt: incoming.trakt ?? existing.trakt,
+    };
+  }
+
+  /**
+   * Supplement movie details with missing metadata from fallback providers.
+   * This fills in gaps (like production company logos) from other providers when the primary doesn't have them.
+   * 
+   * @deprecated Use fetchAllMovieProviderMetadata instead for new code.
+   * This method is kept for backwards compatibility.
+   */
+  private async supplementMovieDetails(
+    details: MovieDetails,
+    primaryIntegration: string,
+    usedIntegrations: string[]
+  ): Promise<MovieDetails> {
+    // Check if we need to supplement production company logos
+    const needsCompanyLogo = details.productionCompanies?.some(c => !c.logoPath) ?? false;
+    
+    if (!needsCompanyLogo) {
+      return details;
+    }
+
+    // Try to get supplementary data from fallback integrations
+    for (const integrationId of this.settings.movieIntegrations) {
+      // Skip the primary integration we already used
+      if (integrationId === primaryIntegration) continue;
+      if (!this.isIntegrationReady(integrationId)) continue;
+
+      const integration = this.getIntegration<MetadataIntegration>(integrationId);
+      if (!integration || !isMetadataIntegration(integration)) continue;
+
+      try {
+        // Get the external ID for this integration
+        const externalId = this.getMovieExternalIdForIntegration(details.externalIds, integrationId);
+        if (!externalId) continue;
+
+        const fallbackDetails = await integration.getMovieDetails(externalId);
+        if (!fallbackDetails) continue;
+
+        // Merge production company logos from fallback provider
+        if (fallbackDetails.productionCompanies && fallbackDetails.productionCompanies.length > 0) {
+          details = this.mergeCompanyLogos(details, fallbackDetails.productionCompanies);
+          
+          // Track that we used this integration for supplementary data
+          if (!usedIntegrations.includes(integrationId)) {
+            usedIntegrations.push(integrationId);
+          }
+          
+          // Check if we still need more data
+          const stillNeedsLogo = details.productionCompanies?.some(c => !c.logoPath) ?? false;
+          if (!stillNeedsLogo) {
+            break; // We've filled all gaps
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching supplementary movie data from ${integrationId}:`, error);
+      }
+    }
+
+    return details;
+  }
+
+  /**
+   * Get the external ID for a specific movie integration from the external IDs object.
+   */
+  private getMovieExternalIdForIntegration(
+    externalIds: MovieDetails['externalIds'],
+    integrationId: string
+  ): string | undefined {
+    switch (integrationId) {
+      case 'tmdb':
+        return externalIds.tmdb ? String(externalIds.tmdb) : undefined;
+      case 'imdb':
+        return externalIds.imdb;
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Merge production company logos from fallback data into the primary details.
+   */
+  private mergeCompanyLogos(
+    details: MovieDetails,
+    fallbackCompanies: NonNullable<MovieDetails['productionCompanies']>
+  ): MovieDetails {
+    if (!details.productionCompanies || details.productionCompanies.length === 0) {
+      return details;
+    }
+
+    // Create a map of company names to logo paths from fallback data
+    const logoMap = new Map<string, string>();
+    for (const company of fallbackCompanies) {
+      if (company.logoPath) {
+        logoMap.set(company.name.toLowerCase().trim(), company.logoPath);
+      }
+    }
+
+    // Update companies with missing logos
+    const updatedCompanies = details.productionCompanies.map(company => {
+      if (company.logoPath) {
+        return company;
+      }
+
+      const normalizedName = company.name.toLowerCase().trim();
+      const logoPath = logoMap.get(normalizedName);
+      
+      if (logoPath) {
+        return { ...company, logoPath };
+      }
+
+      return company;
+    });
+
+    return { ...details, productionCompanies: updatedCompanies };
   }
 
   /**
@@ -461,7 +970,7 @@ export class MetadataManager {
     usedIntegrations.push(match.integration);
 
     // Step 2: Fetch full details
-    const details = await this.fetchShowDetails(
+    let details = await this.fetchShowDetails(
       match.integration,
       match.integrationId
     );
@@ -481,7 +990,10 @@ export class MetadataManager {
       };
     }
 
-    // Step 3: Fetch artwork
+    // Step 3: Supplement missing metadata from fallback providers
+    details = await this.supplementShowDetails(details, match.integration, usedIntegrations);
+
+    // Step 4: Fetch artwork
     let artwork: Artwork | null = null;
     if (details.externalIds.tvdb) {
       artwork = await this.fetchShowArtwork(details.externalIds.tvdb);
@@ -493,7 +1005,7 @@ export class MetadataManager {
       }
     }
 
-    // Step 4: Fetch ratings
+    // Step 5: Fetch ratings
     let ratings: AggregateRatings | null = null;
     if (details.externalIds.imdb) {
       ratings = await this.fetchShowRatings(details.externalIds.imdb);
@@ -516,6 +1028,122 @@ export class MetadataManager {
         integrations: usedIntegrations,
       },
     };
+  }
+
+  /**
+   * Supplement show details with missing metadata from fallback providers.
+   * This fills in gaps (like network logos) from other providers when the primary doesn't have them.
+   */
+  private async supplementShowDetails(
+    details: ShowDetails,
+    primaryIntegration: string,
+    usedIntegrations: string[]
+  ): Promise<ShowDetails> {
+    // Check if we need to supplement network logos
+    const needsNetworkLogo = details.networks?.some(n => !n.logoPath) ?? false;
+    
+    if (!needsNetworkLogo) {
+      return details;
+    }
+
+    // Try to get supplementary data from fallback integrations
+    for (const integrationId of this.settings.tvIntegrations) {
+      // Skip the primary integration we already used
+      if (integrationId === primaryIntegration) continue;
+      if (!this.isIntegrationReady(integrationId)) continue;
+
+      const integration = this.getIntegration<MetadataIntegration>(integrationId);
+      if (!integration || !isMetadataIntegration(integration)) continue;
+
+      try {
+        // Get the external ID for this integration
+        const externalId = this.getExternalIdForIntegration(details.externalIds, integrationId);
+        if (!externalId) continue;
+
+        const fallbackDetails = await integration.getShowDetails(externalId);
+        if (!fallbackDetails) continue;
+
+        // Merge network logos from fallback provider
+        if (fallbackDetails.networks && fallbackDetails.networks.length > 0) {
+          details = this.mergeNetworkLogos(details, fallbackDetails.networks);
+          
+          // Track that we used this integration for supplementary data
+          if (!usedIntegrations.includes(integrationId)) {
+            usedIntegrations.push(integrationId);
+          }
+          
+          // Check if we still need more data
+          const stillNeedsLogo = details.networks?.some(n => !n.logoPath) ?? false;
+          if (!stillNeedsLogo) {
+            break; // We've filled all gaps
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching supplementary data from ${integrationId}:`, error);
+      }
+    }
+
+    return details;
+  }
+
+  /**
+   * Get the external ID for a specific integration from the external IDs object.
+   */
+  private getExternalIdForIntegration(
+    externalIds: ShowDetails['externalIds'],
+    integrationId: string
+  ): string | undefined {
+    switch (integrationId) {
+      case 'tmdb':
+        return externalIds.tmdb ? String(externalIds.tmdb) : undefined;
+      case 'tvdb':
+        return externalIds.tvdb ? String(externalIds.tvdb) : undefined;
+      case 'imdb':
+        return externalIds.imdb;
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Merge network logos from fallback data into the primary details.
+   * Matches networks by name and fills in missing logo paths.
+   */
+  private mergeNetworkLogos(
+    details: ShowDetails,
+    fallbackNetworks: NonNullable<ShowDetails['networks']>
+  ): ShowDetails {
+    if (!details.networks || details.networks.length === 0) {
+      return details;
+    }
+
+    // Create a map of network names to logo paths from fallback data
+    const logoMap = new Map<string, string>();
+    for (const network of fallbackNetworks) {
+      if (network.logoPath) {
+        // Normalize network name for matching (lowercase, trim)
+        logoMap.set(network.name.toLowerCase().trim(), network.logoPath);
+      }
+    }
+
+    // Update networks with missing logos
+    const updatedNetworks = details.networks.map(network => {
+      if (network.logoPath) {
+        return network; // Already has a logo
+      }
+
+      // Try to find a matching logo from fallback
+      const normalizedName = network.name.toLowerCase().trim();
+      const logoPath = logoMap.get(normalizedName);
+      
+      if (logoPath) {
+        return { ...network, logoPath };
+      }
+
+      return network;
+    });
+
+    return { ...details, networks: updatedNetworks };
   }
 }
 

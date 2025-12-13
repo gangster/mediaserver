@@ -100,3 +100,15 @@ export {
   oauthTokens,
 } from './oauth.js';
 
+// Provider metadata (multi-provider caching)
+export {
+  providerMetadata,
+  providerCredits,
+  providerSeasons,
+  providerEpisodes,
+} from './provider-metadata.js';
+export type {
+  ProviderMetadataMediaType,
+  MetadataProvider,
+} from './provider-metadata.js';
+

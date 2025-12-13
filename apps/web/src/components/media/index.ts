@@ -63,3 +63,25 @@ export {
   MediaGrid as BrowseMediaGrid,
   type MediaGridProps as BrowseMediaGridProps,
 } from './grid';
+
+// Ratings components
+export {
+  RatingBadge,
+  MultiRating,
+  LegacyRating,
+  type RatingData,
+  type RatingSource,
+} from './ratings';
+
+// Technical details
+export { TechnicalDetails } from './details';
+
+// Metadata source selector
+export { MetadataSourceSelector, type ProviderMetadataResult, type ProductionCompany } from './MetadataSourceSelector';
+
+// Refresh metadata button
+export { RefreshMetadataButton } from './RefreshMetadataButton';
+
+// Cast and crew sections
+export { CastSection, GuestStarsSection } from './CastSection';
+export type { CastMember, CrewMember, GuestStar } from './CastSection';

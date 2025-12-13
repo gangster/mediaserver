@@ -6,6 +6,7 @@ import { trpc } from '../client.js';
 
 /**
  * Hook for listing jobs with pagination and filters.
+ * Polls every 3 seconds for real-time updates.
  */
 export function useJobs(options?: {
   page?: number;
@@ -20,31 +21,39 @@ export function useJobs(options?: {
     status: options?.status,
     type: options?.type,
     queue: options?.queue,
+  }, {
+    refetchInterval: 3000, // Poll every 3 seconds for real-time updates
   });
 }
 
 /**
  * Hook for getting a single job by ID.
+ * When enabled, polls every 2 seconds to track job progress.
  */
 export function useJob(id: string, enabled = true) {
-  return trpc.jobs.get.useQuery({ id }, { enabled });
+  return trpc.jobs.get.useQuery({ id }, {
+    enabled,
+    refetchInterval: enabled ? 2000 : false, // Poll every 2 seconds when enabled
+  });
 }
 
 /**
  * Hook for getting active jobs (for dashboard).
+ * Polls every 2 seconds for real-time updates.
  */
 export function useActiveJobs() {
   return trpc.jobs.active.useQuery(undefined, {
-    refetchInterval: 5000, // Refetch every 5 seconds
+    refetchInterval: 2000, // Refetch every 2 seconds for real-time updates
   });
 }
 
 /**
  * Hook for getting queue statistics.
+ * Polls every 3 seconds for real-time updates.
  */
 export function useJobStats() {
   return trpc.jobs.stats.useQuery(undefined, {
-    refetchInterval: 10000, // Refetch every 10 seconds
+    refetchInterval: 3000, // Refetch every 3 seconds for real-time updates
   });
 }
 
@@ -89,4 +98,5 @@ export function usePauseQueue() {
 export function useResumeQueue() {
   return trpc.jobs.resumeQueue.useMutation();
 }
+
 

@@ -28,7 +28,7 @@ const DESKTOP_BREAKPOINT = 1024;
  */
 export function Layout({ children }: LayoutProps) {
   const pathname = usePathname();
-  const { width } = useWindowDimensions();
+  const { width, height: windowHeight } = useWindowDimensions();
   const sidebarCollapsed = usePreferencesStore((state) => state.sidebarCollapsed);
   const { isOpen: searchOpen, open: openSearch, close: closeSearch } = useGlobalSearch();
 
@@ -51,7 +51,7 @@ export function Layout({ children }: LayoutProps) {
   const sidebarWidth = sidebarCollapsed ? 64 : 256;
 
   return (
-    <View className="min-h-screen bg-zinc-900">
+    <View style={{ height: windowHeight, overflow: 'hidden' }} className="bg-zinc-900">
       {/* Desktop Sidebar - hidden on mobile */}
       {isDesktop && <Sidebar onSearch={openSearch} />}
 
@@ -60,10 +60,12 @@ export function Layout({ children }: LayoutProps) {
 
       {/* Main content area */}
       <View
-        className="min-h-screen"
         style={{
+          flex: 1,
+          height: '100%',
           paddingBottom: isDesktop ? 0 : 80,
           marginLeft: isDesktop ? sidebarWidth : 0,
+          overflow: 'hidden',
         }}
       >
         {children}
@@ -79,3 +81,4 @@ export function Layout({ children }: LayoutProps) {
 }
 
 export default Layout;
+

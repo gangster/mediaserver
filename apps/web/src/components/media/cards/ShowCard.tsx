@@ -11,6 +11,7 @@ import { View, Text, Pressable, Image, type ViewStyle } from 'react-native';
 import { Link } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { usePreferencesStore } from '../../../stores/preferences';
+import { getMediaImageUrl } from '../../../lib/config';
 
 /** Show item data */
 export interface ShowItem {
@@ -52,7 +53,7 @@ function getImageUrl(
   itemId: string
 ): string {
   if (!path) return '';
-  return `http://localhost:3000/api/images/shows/${itemId}/${type}?size=medium`;
+  return getMediaImageUrl('shows', itemId, type, 'medium');
 }
 
 /** Format year range for shows */

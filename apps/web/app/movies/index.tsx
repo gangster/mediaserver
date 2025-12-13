@@ -1,8 +1,8 @@
 /**
  * Movies browse page
  *
- * Premium browsing experience with multiple view modes,
- * search, filters, and pagination.
+ * Premium browsing experience with infinite scroll, multiple view modes,
+ * search, filters, and smooth animations.
  * Adapted from forreel for React Native Web.
  */
 
@@ -13,8 +13,7 @@ import { Layout } from '../../src/components/layout';
 import { useMovies, useMovieGenres, useMovieYears } from '@mediaserver/api-client';
 import { usePreferencesStore } from '../../src/stores/preferences';
 import {
-  MovieCard,
-  MovieCardSkeleton,
+  BrowseMediaGrid as MediaGrid,
   MediaToolbar,
   type MovieItem,
   type FilterOption,
@@ -73,25 +72,6 @@ function toMovieItem(movie: {
 }
 
 /**
- * Calculate grid columns based on view mode
- */
-function getGridColumns(viewMode: string): number {
-  switch (viewMode) {
-    case 'poster':
-    case 'posterCard':
-      return 8; // Many columns for poster view
-    case 'thumb':
-    case 'thumbCard':
-      return 4; // Fewer columns for thumb view
-    case 'list':
-    case 'banner':
-      return 1; // Single column
-    default:
-      return 6;
-  }
-}
-
-/**
  * Movies browse page
  */
 export default function MoviesPage() {
@@ -103,16 +83,13 @@ export default function MoviesPage() {
   const [selectedGenre, setSelectedGenre] = useState<string | undefined>();
   const [selectedYear, setSelectedYear] = useState<string | undefined>();
   const [selectedSort, setSelectedSort] = useState('addedAt-desc');
-  const [offset, setOffset] = useState(0);
-  const limit = 50;
 
   // Parse sort
   const { sortBy, sortOrder } = parseSort(selectedSort);
 
-  // Fetch movies
+  // Fetch all movies (client-side filtering for now)
   const { data: moviesData, isLoading: moviesLoading } = useMovies({
-    // Note: Add search/filter params when API supports them
-    limit,
+    limit: 100, // Server max limit is 100
   });
 
   // Fetch genres for filtering
@@ -174,22 +151,19 @@ export default function MoviesPage() {
     return items;
   }, [movieItems, searchQuery, selectedGenre, selectedYear, sortBy, sortOrder]);
 
-  // Paginate
-  const paginatedItems = useMemo(
-    () => filteredItems.slice(offset, offset + limit),
-    [filteredItems, offset, limit]
-  );
-
-  // Format filter options
+  // Format filter options - server returns plain arrays (strings for genres, numbers for years)
   const genreOptions: FilterOption[] = useMemo(
-    () => genres?.map((g: { name: string; count: number }) => ({ value: g.name, label: g.name, count: g.count })) ?? [],
+    () => genres?.map((g: string) => ({ value: g, label: g })) ?? [],
     [genres]
   );
 
   const yearOptions: FilterOption[] = useMemo(
-    () => years?.map((y: { year: number; count: number }) => ({ value: String(y.year), label: String(y.year), count: y.count })) ?? [],
+    () => years?.map((y: number) => ({ value: String(y), label: String(y) })) ?? [],
     [years]
   );
+
+  // Total count
+  const total = moviesData?.total ?? 0;
 
   // Handlers
   const handleItemClick = useCallback(
@@ -201,63 +175,55 @@ export default function MoviesPage() {
 
   const handleGenreChange = useCallback((genre: string | undefined) => {
     setSelectedGenre(genre);
-    setOffset(0);
   }, []);
 
   const handleYearChange = useCallback((year: string | undefined) => {
     setSelectedYear(year);
-    setOffset(0);
   }, []);
 
   const handleSortChange = useCallback((sort: string) => {
     setSelectedSort(sort);
-    setOffset(0);
   }, []);
 
   const handleSearchChange = useCallback((query: string) => {
     setSearchQuery(query);
-    setOffset(0);
   }, []);
 
-  const handlePageChange = useCallback((newOffset: number) => {
-    setOffset(newOffset);
+  // Page change handler (for pagination display - scrolls to top)
+  const handlePageChange = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
 
   // Get empty message based on filters
-  const getEmptyMessage = () => {
+  const getEmptyMessage = useCallback(() => {
     if (searchQuery) return `No movies found matching "${searchQuery}"`;
     if (selectedGenre || selectedYear) return 'No movies match the selected filters';
     return 'No movies in your library';
-  };
-
-  // Calculate grid layout
-  const columns = getGridColumns(moviesViewMode);
-  const isGridLayout = moviesViewMode !== 'list' && moviesViewMode !== 'banner';
-  const gap = isGridLayout ? 16 : moviesViewMode === 'list' ? 4 : 16;
+  }, [searchQuery, selectedGenre, selectedYear]);
 
   return (
     <Layout>
       <ScrollView style={{ flex: 1, backgroundColor: '#18181b' }}>
         <View style={{ paddingHorizontal: 32, paddingVertical: 24 }}>
-        {/* Header */}
+          {/* Header */}
           <View style={{ marginBottom: 24 }}>
             <Text style={{ fontSize: 30, fontWeight: '700', color: '#fff', marginBottom: 4 }}>
               Movies
             </Text>
-            {filteredItems.length > 0 && (
+            {total > 0 && (
               <Text style={{ color: '#a1a1aa', fontSize: 14 }}>
-                {filteredItems.length} {filteredItems.length === 1 ? 'movie' : 'movies'} in your library
-          </Text>
+                {total} {total === 1 ? 'movie' : 'movies'} in your library
+              </Text>
             )}
           </View>
 
           {/* Toolbar */}
-          <View style={{ marginBottom: 24 }}>
+          <View style={{ marginBottom: 24, zIndex: 100 }}>
             <MediaToolbar
               mediaType="movies"
               total={filteredItems.length}
-              offset={offset}
-              limit={limit}
+              offset={0}
+              limit={filteredItems.length}
               searchQuery={searchQuery}
               selectedSort={selectedSort}
               sortOptions={sortOptions}
@@ -271,69 +237,18 @@ export default function MoviesPage() {
               onYearChange={handleYearChange}
               onPageChange={handlePageChange}
             />
-        </View>
+          </View>
 
           {/* Movies grid */}
-          {moviesLoading && offset === 0 ? (
-            <View
-              style={
-                isGridLayout
-                  ? {
-                      flexDirection: 'row',
-                      flexWrap: 'wrap',
-                      gap,
-                    }
-                  : { gap }
-              }
-            >
-              {Array.from({ length: 12 }).map((_, i) => (
-                  <View
-                    key={i}
-                  style={
-                    isGridLayout
-                      ? { width: `${100 / columns}%`, paddingRight: gap }
-                      : { width: '100%' }
-                  }
-                  >
-                  <MovieCardSkeleton variant={moviesViewMode} />
-                </View>
-              ))}
-            </View>
-          ) : paginatedItems.length === 0 ? (
-            <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: 64 }}>
-              <Text style={{ color: '#a1a1aa', fontSize: 18 }}>{getEmptyMessage()}</Text>
-                  </View>
-          ) : (
-                  <View
-              style={
-                isGridLayout
-                  ? {
-                      flexDirection: 'row',
-                      flexWrap: 'wrap',
-                      gap,
-                    }
-                  : { gap }
-              }
-            >
-              {paginatedItems.map((item: MovieItem, index: number) => (
-                <View
-                  key={item.id}
-                  style={
-                    isGridLayout
-                      ? { width: `${100 / columns}%`, paddingRight: gap }
-                      : { width: '100%' }
-                  }
-                >
-                  <MovieCard
-                    item={item}
-                    variant={moviesViewMode}
-                    onClick={handleItemClick}
-                    priority={index < 12}
-                    />
-                  </View>
-                ))}
-          </View>
-          )}
+          <MediaGrid
+            mediaType="movies"
+            items={filteredItems}
+            viewMode={moviesViewMode}
+            isLoading={moviesLoading}
+            onItemClick={handleItemClick}
+            emptyMessage={getEmptyMessage()}
+            skeletonCount={moviesViewMode === 'list' || moviesViewMode === 'banner' ? 6 : 12}
+          />
         </View>
       </ScrollView>
     </Layout>

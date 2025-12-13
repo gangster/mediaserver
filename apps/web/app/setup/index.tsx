@@ -5,8 +5,9 @@
  * 1. Welcome
  * 2. Create admin account
  * 3. Add first library (optional)
- * 4. Privacy settings
- * 5. Ready!
+ * 4. Configure metadata providers (TMDB required for metadata/images)
+ * 5. Privacy settings
+ * 6. Ready!
  *
  * Matches the behavior of the original Forreel setup wizard.
  */
@@ -24,11 +25,13 @@ import {
   useCompleteSetup,
   useLibraryUtils,
   useCreatePath,
+  useMetadataProviders,
+  useSaveMetadataProviders,
 } from '@mediaserver/api-client';
 import { useAuth } from '../../src/hooks/useAuth';
 
 /** Wizard step type */
-type Step = 'welcome' | 'account' | 'library' | 'privacy' | 'ready';
+type Step = 'welcome' | 'account' | 'library' | 'providers' | 'privacy' | 'ready';
 
 /** Library type */
 type LibraryType = 'movie' | 'tv';
@@ -54,6 +57,7 @@ interface WizardState {
   createdLibraries: LibraryType[];
   privacyLevel: PrivacyLevel;
   accountEmail?: string;
+  tmdbApiKey?: string;
 }
 
 /** Path validation state */
@@ -122,7 +126,7 @@ function loadWizardState(): WizardState | null {
 
 /** Progress bar component */
 function ProgressBar({ step }: { step: Step }) {
-  const steps: Step[] = ['welcome', 'account', 'library', 'privacy', 'ready'];
+  const steps: Step[] = ['welcome', 'account', 'library', 'providers', 'privacy', 'ready'];
   const currentIndex = steps.indexOf(step);
   const progress = (currentIndex / (steps.length - 1)) * 100;
 
@@ -158,12 +162,19 @@ export default function SetupWizard() {
   const [privacyLevel, setPrivacyLevel] = useState<PrivacyLevel>(() =>
     loadWizardState()?.privacyLevel ?? 'private'
   );
+  const [tmdbApiKey, setTmdbApiKey] = useState(() =>
+    loadWizardState()?.tmdbApiKey ?? ''
+  );
 
   // Path validation state per library type
   const [pathValidation, setPathValidation] = useState<Record<LibraryType, PathValidation>>({
     movie: { checked: false, exists: false, isDirectory: false, isWritable: false, parentExists: false, parentWritable: false, isChecking: false, error: null, justCreated: false },
     tv: { checked: false, exists: false, isDirectory: false, isWritable: false, parentExists: false, parentWritable: false, isChecking: false, error: null, justCreated: false },
   });
+
+  // Provider testing state
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Form state
   const [email, setEmail] = useState('');
@@ -184,6 +195,8 @@ export default function SetupWizard() {
   const completeSetup = useCompleteSetup();
   const createPath = useCreatePath();
   const libraryUtils = useLibraryUtils();
+  useMetadataProviders(); // Pre-fetch provider data
+  const saveProviders = useSaveMetadataProviders();
   
   // Auth hook for login after account creation
   const { login } = useAuth();
@@ -205,8 +218,9 @@ export default function SetupWizard() {
       createdLibraries,
       privacyLevel,
       accountEmail,
+      tmdbApiKey,
     });
-  }, [step, libraryTypeData, selectedLibraryType, createdLibraries, privacyLevel, accountEmail]);
+  }, [step, libraryTypeData, selectedLibraryType, createdLibraries, privacyLevel, accountEmail, tmdbApiKey]);
 
   useEffect(() => {
     persistState();
@@ -229,7 +243,7 @@ export default function SetupWizard() {
 
     // Validate current step against server state
     // If we're on library step or later but no owner exists, go back to account step
-    if (!status.hasOwner && (step === 'library' || step === 'privacy' || step === 'ready')) {
+    if (!status.hasOwner && (step === 'library' || step === 'providers' || step === 'privacy' || step === 'ready')) {
       setStep('account');
       // Clear persisted state since it's out of sync
       clearSetupInProgress();
@@ -427,7 +441,7 @@ export default function SetupWizard() {
         created.push(type);
       }
       setCreatedLibraries(created);
-      setStep('privacy');
+      setStep('providers');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create library');
     }
@@ -775,7 +789,7 @@ export default function SetupWizard() {
                     className="flex-1 py-3 px-4 rounded-lg border border-zinc-700 active:border-zinc-600"
                     onPress={() => {
                       setCreatedLibraries([]);
-                      setStep('privacy');
+                      setStep('providers');
                     }}
                     disabled={addLibrary.isPending}
                   >
@@ -799,6 +813,195 @@ export default function SetupWizard() {
                   </Pressable>
                 </View>
               </View>
+            </View>
+          </View>
+        )}
+
+        {/* Metadata Providers Step */}
+        {step === 'providers' && (
+          <View className="flex-1 items-center justify-center px-8">
+            <View className="w-full max-w-lg">
+              <View className="mb-8">
+                <Text className="text-2xl font-bold text-white text-center">Metadata Providers</Text>
+                <Text className="text-zinc-400 mt-2 text-center">
+                  Configure metadata providers to fetch movie/TV info and images.
+                </Text>
+              </View>
+
+              {error && (
+                <View className="mb-6 p-4 rounded-lg bg-red-500/10 border border-red-500/20">
+                  <Text className="text-red-400 text-sm">{error}</Text>
+                  <Pressable onPress={() => setError('')}>
+                    <Text className="text-red-400/60 text-xs mt-1">Dismiss</Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {/* TMDB Configuration */}
+              <View className="bg-zinc-800/50 rounded-xl p-6 mb-6 border border-zinc-700">
+                <View className="flex-row items-center gap-3 mb-4">
+                  <Text className="text-3xl">🎬</Text>
+                  <View className="flex-1">
+                    <Text className="text-white font-semibold text-lg">TMDb</Text>
+                    <Text className="text-zinc-400 text-sm">The Movie Database</Text>
+                  </View>
+                  {tmdbApiKey && testResult?.success && (
+                    <View className="px-2 py-1 bg-emerald-500/20 rounded">
+                      <Text className="text-emerald-400 text-xs">Configured</Text>
+                    </View>
+                  )}
+                </View>
+
+                <Text className="text-zinc-400 text-sm mb-4">
+                  TMDb provides metadata, posters, backdrops, and cast information for your media.
+                  A free API key is required.
+                </Text>
+
+                <View className="mb-4">
+                  <Text className="text-sm font-medium text-zinc-300 mb-2">API Key</Text>
+                  <TextInput
+                    className="w-full px-4 py-3 rounded-lg bg-zinc-900/50 border border-zinc-600 text-white"
+                    placeholder="Enter your TMDb API key"
+                    placeholderTextColor="#71717a"
+                    value={tmdbApiKey}
+                    onChangeText={(value) => {
+                      setTmdbApiKey(value);
+                      setTestResult(null);
+                    }}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    secureTextEntry={false}
+                  />
+                </View>
+
+                {/* Test result message */}
+                {testResult && (
+                  <View className={`mb-4 p-3 rounded-lg ${testResult.success ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-red-500/10 border border-red-500/20'}`}>
+                    <Text className={testResult.success ? 'text-emerald-400 text-sm' : 'text-red-400 text-sm'}>
+                      {testResult.message}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Test button */}
+                {tmdbApiKey && (
+                  <Pressable
+                    className={`py-2 px-4 rounded-lg border ${isTesting ? 'border-zinc-600 bg-zinc-700/50' : 'border-emerald-500/50 bg-emerald-500/10 active:bg-emerald-500/20'}`}
+                    onPress={async () => {
+                      if (!tmdbApiKey.trim()) return;
+                      setIsTesting(true);
+                      setTestResult(null);
+                      try {
+                        // Test the API key by making a simple request
+                        const response = await fetch(
+                          `https://api.themoviedb.org/3/configuration?api_key=${tmdbApiKey.trim()}`
+                        );
+                        if (response.ok) {
+                          setTestResult({ success: true, message: '✓ API key is valid!' });
+                        } else {
+                          const data = await response.json();
+                          setTestResult({ success: false, message: data.status_message || 'Invalid API key' });
+                        }
+                      } catch {
+                        setTestResult({ success: false, message: 'Connection error. Check your network.' });
+                      } finally {
+                        setIsTesting(false);
+                      }
+                    }}
+                    disabled={isTesting}
+                  >
+                    {isTesting ? (
+                      <View className="flex-row items-center justify-center gap-2">
+                        <ActivityIndicator size="small" color="#10b981" />
+                        <Text className="text-zinc-400">Testing...</Text>
+                      </View>
+                    ) : (
+                      <Text className="text-emerald-400 text-center font-medium">Test Connection</Text>
+                    )}
+                  </Pressable>
+                )}
+
+                {/* Get API Key link */}
+                <View className="mt-4 pt-4 border-t border-zinc-700">
+                  <Pressable
+                    onPress={() => {
+                      if (typeof window !== 'undefined') {
+                        window.open('https://www.themoviedb.org/settings/api', '_blank');
+                      }
+                    }}
+                  >
+                    <Text className="text-emerald-400 text-sm">
+                      Don&apos;t have an API key? Get one free at TMDb →
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              {/* Info note */}
+              <View className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-8">
+                <Text className="text-blue-400 text-sm">
+                  💡 You can configure additional providers (TVDb, Trakt, etc.) later in Server Settings.
+                </Text>
+              </View>
+
+              {/* Buttons */}
+              <View className="flex-row gap-4">
+                <Pressable
+                  className="flex-1 py-3 px-4 rounded-lg border border-zinc-700 active:border-zinc-600"
+                  onPress={() => setStep('library')}
+                  disabled={saveProviders.isPending}
+                >
+                  <Text className="text-zinc-400 text-center font-medium">Back</Text>
+                </Pressable>
+                <Pressable
+                  className={`flex-1 py-3 px-4 rounded-lg ${
+                    !tmdbApiKey || saveProviders.isPending
+                      ? 'bg-zinc-700'
+                      : 'bg-emerald-600 active:bg-emerald-500'
+                  }`}
+                  onPress={async () => {
+                    if (!tmdbApiKey.trim()) {
+                      setError('Please enter a TMDb API key to fetch metadata and images');
+                      return;
+                    }
+                    
+                    setError('');
+                    try {
+                      // Save the TMDB provider config
+                      await saveProviders.mutateAsync({
+                        providers: [
+                          { id: 'tmdb', apiKey: tmdbApiKey.trim(), enabled: true },
+                        ],
+                      });
+                      setStep('privacy');
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Failed to save provider configuration');
+                    }
+                  }}
+                  disabled={!tmdbApiKey || saveProviders.isPending}
+                >
+                  {saveProviders.isPending ? (
+                    <View className="flex-row items-center justify-center gap-2">
+                      <ActivityIndicator size="small" color="white" />
+                      <Text className="text-white font-medium">Saving...</Text>
+                    </View>
+                  ) : (
+                    <Text className={`text-center font-medium ${!tmdbApiKey ? 'text-zinc-500' : 'text-white'}`}>
+                      Continue
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+
+              {/* Skip option */}
+              <Pressable
+                className="mt-4 py-2"
+                onPress={() => setStep('privacy')}
+              >
+                <Text className="text-zinc-500 text-center text-sm">
+                  Skip for now (you won&apos;t have metadata or images)
+                </Text>
+              </Pressable>
             </View>
           </View>
         )}
@@ -852,7 +1055,7 @@ export default function SetupWizard() {
               <View className="flex-row gap-4">
                 <Pressable
                   className="flex-1 py-3 px-4 rounded-lg border border-zinc-700 active:border-zinc-600"
-                  onPress={() => setStep('library')}
+                  onPress={() => setStep('providers')}
                   disabled={savePrivacy.isPending}
                 >
                   <Text className="text-zinc-400 text-center font-medium">Back</Text>
@@ -891,7 +1094,7 @@ export default function SetupWizard() {
               <Text className="text-3xl font-bold text-white mb-4 text-center">You&apos;re All Set!</Text>
               <Text className="text-zinc-400 mb-8 text-center">
                 {BRANDING.name} is ready to use. Your media server is now configured and running.
-                {createdLibraries.length > 0 && ' You can trigger a library scan from the Libraries page.'}
+                {createdLibraries.length > 0 && ' Your libraries will be scanned automatically.'}
               </Text>
 
               <View className="bg-zinc-800/50 rounded-xl p-6 mb-8 w-full">
@@ -913,12 +1116,27 @@ export default function SetupWizard() {
                       </Text>
                     </View>
                   )}
+                  {tmdbApiKey && (
+                    <View className="flex-row justify-between">
+                      <Text className="text-zinc-400 text-sm">Metadata Provider</Text>
+                      <Text className="text-white text-sm">TMDb Configured</Text>
+                    </View>
+                  )}
                   <View className="flex-row justify-between">
                     <Text className="text-zinc-400 text-sm">Privacy Level</Text>
                     <Text className="text-white text-sm capitalize">{privacyLevel}</Text>
                   </View>
                 </View>
               </View>
+
+              {createdLibraries.length > 0 && (
+                <View className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-6 w-full">
+                  <Text className="text-blue-400 text-sm text-center">
+                    📚 Your {createdLibraries.length === 1 ? 'library' : 'libraries'} will start scanning automatically when you click below.
+                    {tmdbApiKey ? ' Metadata and images will be fetched from TMDb.' : ''}
+                  </Text>
+                </View>
+              )}
 
               <Pressable
                 className="w-full py-4 px-6 bg-emerald-600 active:bg-emerald-500 rounded-xl"

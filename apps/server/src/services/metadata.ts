@@ -10,15 +10,21 @@ import {
   type Database,
   movies,
   tvShows,
+  seasons,
+  episodes,
   genres,
   movieGenres,
   showGenres,
   people,
   movieCredits,
+  showCredits,
   contentRatings,
   trailers,
   externalIds,
   mediaRatings,
+  providerMetadata,
+  providerCredits,
+  providerEpisodes,
 } from '@mediaserver/db';
 import {
   MetadataManager,
@@ -31,6 +37,7 @@ import {
   type ShowDetails,
   type MetadataSettings,
   type MetadataIntegration,
+  type ExternalIds,
 } from '@mediaserver/metadata';
 import { logger } from '../lib/logger.js';
 import { nanoid } from 'nanoid';
@@ -133,16 +140,23 @@ export interface MetadataFetchResult {
 }
 
 /**
- * Fetch metadata for a single movie
+ * Fetch metadata for a single movie from ALL configured providers.
+ * 
+ * This uses the new multi-provider architecture:
+ * 1. Fetches metadata from ALL enabled providers in parallel
+ * 2. Stores each provider's data in provider_metadata table
+ * 3. Updates the main movies table with the default provider's data
+ * 4. Enables instant provider switching in the UI
  */
 export async function fetchMovieMetadata(
   db: Database,
   movieId: string,
   title?: string,
-  year?: number
+  year?: number,
+  forceRefresh = false
 ): Promise<MetadataFetchResult> {
   const log = logger.child({ movieId });
-  log.info('Fetching movie metadata');
+  log.info('Fetching movie metadata from all providers');
 
   const manager = getMetadataManager();
 
@@ -160,7 +174,7 @@ export async function fetchMovieMetadata(
   const searchYear = year ?? movie.year ?? undefined;
 
   // Skip if already matched and not forcing refresh
-  if (movie.matchStatus === 'matched') {
+  if (movie.matchStatus === 'matched' && !forceRefresh) {
     log.info('Movie already matched, skipping');
     return { 
       matched: true, 
@@ -172,13 +186,11 @@ export async function fetchMovieMetadata(
   }
 
   try {
-    // Fetch complete metadata
-    const { details, ratings, result } = await manager.fetchCompleteMovieMetadata(
-      searchTitle,
-      searchYear
-    );
+    // Fetch metadata from ALL providers
+    const { providerData, ratings, result, externalIds: allExternalIds } = 
+      await manager.fetchAllMovieProviderMetadata(searchTitle, searchYear);
 
-    if (!result.matched || !details) {
+    if (!result.matched || Object.keys(providerData).length === 0) {
       // Mark as unmatched
       await db.update(movies)
         .set({ matchStatus: 'unmatched' })
@@ -188,8 +200,42 @@ export async function fetchMovieMetadata(
       return { matched: false };
     }
 
-    // Save metadata to database
-    await saveMovieMetadata(db, movieId, details);
+    // Save metadata from EACH provider to provider_metadata table
+    const providersSaved: string[] = [];
+    for (const [provider, details] of Object.entries(providerData)) {
+      try {
+        await saveProviderMovieMetadata(db, movieId, provider, details);
+        providersSaved.push(provider);
+        log.debug({ provider }, 'Saved provider metadata');
+      } catch (error) {
+        log.error({ error, provider }, 'Failed to save provider metadata');
+      }
+    }
+
+    // Save all external IDs from all providers
+    await saveAllExternalIds(db, 'movie', movieId, allExternalIds);
+
+    // Get the default display provider (prefer tmdb, fall back to first available)
+    const providerKeys = Object.keys(providerData);
+    const displayProvider = providerData['tmdb'] 
+      ? 'tmdb' 
+      : providerKeys[0];
+
+    if (!displayProvider) {
+      log.error('No providers returned data');
+      return { matched: false };
+    }
+
+    const displayDetails = providerData[displayProvider];
+
+    if (!displayDetails) {
+      log.error('No display details available despite having provider data');
+      return { matched: false };
+    }
+
+    // Save to the main movies table for backwards compatibility
+    // This uses the default display provider's data
+    await saveMovieMetadata(db, movieId, displayDetails);
 
     // Save ratings if available
     if (ratings) {
@@ -205,17 +251,24 @@ export async function fetchMovieMetadata(
       .where(eq(movies.id, movieId));
 
     // Extract year from release date
-    const releaseYear = details.releaseDate
-      ? new Date(details.releaseDate).getFullYear()
+    const releaseYear = displayDetails.releaseDate
+      ? new Date(displayDetails.releaseDate).getFullYear()
       : undefined;
 
-    log.info({ confidence: result.confidence }, 'Movie metadata fetched successfully');
+    log.info({ 
+      confidence: result.confidence, 
+      providers: providersSaved,
+      displayProvider,
+    }, 'Movie metadata fetched from all providers successfully');
+
     return {
       matched: true,
-      title: details.title,
+      title: displayDetails.title,
       year: releaseYear,
-      provider: 'tmdb',
-      externalId: String(details.externalIds.tmdb),
+      provider: displayProvider,
+      externalId: displayDetails.externalIds.tmdb 
+        ? String(displayDetails.externalIds.tmdb) 
+        : undefined,
     };
   } catch (error) {
     log.error({ error }, 'Failed to fetch movie metadata');
@@ -231,6 +284,9 @@ async function saveMovieMetadata(
   movieId: string,
   details: MovieDetails
 ): Promise<void> {
+  // Extract genre names for the JSON column
+  const genreNames = details.genres.map((g) => g.name);
+
   // Update movie record
   await db.update(movies)
     .set({
@@ -245,11 +301,12 @@ async function saveMovieMetadata(
       voteCount: details.voteCount,
       posterPath: details.posterPath,
       backdropPath: details.backdropPath,
+      genres: JSON.stringify(genreNames), // Store genres as JSON array for filtering
       updatedAt: new Date().toISOString(),
     })
     .where(eq(movies.id, movieId));
 
-  // Save genres
+  // Save genres to normalized table
   if (details.genres.length > 0) {
     await saveMovieGenres(db, movieId, details.genres);
   }
@@ -342,6 +399,47 @@ async function saveMovieCredits(
     await db.insert(movieCredits).values({
       id: generateId(),
       movieId,
+      personId,
+      roleType: 'crew',
+      department: member.department,
+      job: member.job,
+    });
+  }
+}
+
+/**
+ * Save show cast and crew
+ */
+async function saveShowCredits(
+  db: Database,
+  showId: string,
+  cast: ShowDetails['cast'],
+  crew: ShowDetails['crew']
+): Promise<void> {
+  // Delete existing credits
+  await db.delete(showCredits).where(eq(showCredits.showId, showId));
+
+  // Save cast
+  for (const member of cast) {
+    const personId = await findOrCreatePerson(db, member);
+
+    await db.insert(showCredits).values({
+      id: generateId(),
+      showId,
+      personId,
+      roleType: 'cast',
+      character: member.character,
+      creditOrder: member.order,
+    });
+  }
+
+  // Save crew
+  for (const member of crew) {
+    const personId = await findOrCreatePerson(db, member);
+
+    await db.insert(showCredits).values({
+      id: generateId(),
+      showId,
       personId,
       roleType: 'crew',
       department: member.department,
@@ -471,6 +569,248 @@ async function saveExternalIds(
 }
 
 /**
+ * Save provider-specific metadata for a movie.
+ * This stores the complete metadata from each provider separately,
+ * enabling instant provider switching in the UI.
+ */
+async function saveProviderMovieMetadata(
+  db: Database,
+  movieId: string,
+  provider: string,
+  details: MovieDetails
+): Promise<void> {
+  const genreNames = details.genres.map((g) => g.name);
+  
+  await db.insert(providerMetadata).values({
+    mediaType: 'movie',
+    mediaId: movieId,
+    provider: provider as 'tmdb' | 'tvdb' | 'anidb' | 'anilist' | 'mal' | 'omdb' | 'trakt',
+    title: details.title,
+    originalTitle: details.originalTitle,
+    sortTitle: details.title?.toLowerCase().replace(/^(the|a|an)\s+/i, ''),
+    tagline: details.tagline,
+    overview: details.overview,
+    releaseDate: details.releaseDate,
+    runtime: details.runtime,
+    voteAverage: details.voteAverage,
+    voteCount: details.voteCount,
+    popularity: details.popularity,
+    posterPath: details.posterPath,
+    backdropPath: details.backdropPath,
+    logoPath: details.logoPath,
+    genres: JSON.stringify(genreNames),
+    contentRatings: JSON.stringify(details.contentRatings),
+    productionCompanies: JSON.stringify(details.productionCompanies),
+    trailers: JSON.stringify(details.trailers),
+    homepage: details.homepage,
+    budget: details.budget,
+    revenue: details.revenue,
+    productionCountries: JSON.stringify(details.productionCountries),
+    spokenLanguages: JSON.stringify(details.spokenLanguages),
+    fetchedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }).onConflictDoUpdate({
+    target: [providerMetadata.mediaType, providerMetadata.mediaId, providerMetadata.provider],
+    set: {
+      title: details.title,
+      originalTitle: details.originalTitle,
+      tagline: details.tagline,
+      overview: details.overview,
+      releaseDate: details.releaseDate,
+      runtime: details.runtime,
+      voteAverage: details.voteAverage,
+      voteCount: details.voteCount,
+      popularity: details.popularity,
+      posterPath: details.posterPath,
+      backdropPath: details.backdropPath,
+      logoPath: details.logoPath,
+      genres: JSON.stringify(genreNames),
+      contentRatings: JSON.stringify(details.contentRatings),
+      productionCompanies: JSON.stringify(details.productionCompanies),
+      trailers: JSON.stringify(details.trailers),
+      homepage: details.homepage,
+      budget: details.budget,
+      revenue: details.revenue,
+      productionCountries: JSON.stringify(details.productionCountries),
+      spokenLanguages: JSON.stringify(details.spokenLanguages),
+      updatedAt: new Date().toISOString(),
+    },
+  });
+
+  // Save provider-specific credits
+  await saveProviderCredits(db, 'movie', movieId, provider, details.cast, details.crew);
+}
+
+/**
+ * Save provider-specific metadata for a show.
+ */
+async function saveProviderShowMetadata(
+  db: Database,
+  showId: string,
+  provider: string,
+  details: ShowDetails
+): Promise<void> {
+  const genreNames = details.genres.map((g) => g.name);
+  
+  await db.insert(providerMetadata).values({
+    mediaType: 'show',
+    mediaId: showId,
+    provider: provider as 'tmdb' | 'tvdb' | 'anidb' | 'anilist' | 'mal' | 'omdb' | 'trakt',
+    title: details.title,
+    originalTitle: details.originalTitle,
+    sortTitle: details.title?.toLowerCase().replace(/^(the|a|an)\s+/i, ''),
+    tagline: details.tagline,
+    overview: details.overview,
+    releaseDate: details.firstAirDate,
+    lastAirDate: details.lastAirDate,
+    status: details.status,
+    voteAverage: details.voteAverage,
+    voteCount: details.voteCount,
+    popularity: details.popularity,
+    posterPath: details.posterPath,
+    backdropPath: details.backdropPath,
+    logoPath: details.logoPath,
+    genres: JSON.stringify(genreNames),
+    contentRatings: JSON.stringify(details.contentRatings),
+    networks: JSON.stringify(details.networks),
+    productionCompanies: JSON.stringify(details.productionCompanies),
+    trailers: JSON.stringify(details.trailers),
+    seasons: JSON.stringify(details.seasons),
+    seasonCount: details.numberOfSeasons,
+    episodeCount: details.numberOfEpisodes,
+    homepage: details.homepage,
+    originCountry: JSON.stringify(details.originCountry),
+    originalLanguage: details.originalLanguage,
+    fetchedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }).onConflictDoUpdate({
+    target: [providerMetadata.mediaType, providerMetadata.mediaId, providerMetadata.provider],
+    set: {
+      title: details.title,
+      originalTitle: details.originalTitle,
+      tagline: details.tagline,
+      overview: details.overview,
+      releaseDate: details.firstAirDate,
+      lastAirDate: details.lastAirDate,
+      status: details.status,
+      voteAverage: details.voteAverage,
+      voteCount: details.voteCount,
+      popularity: details.popularity,
+      posterPath: details.posterPath,
+      backdropPath: details.backdropPath,
+      logoPath: details.logoPath,
+      genres: JSON.stringify(genreNames),
+      contentRatings: JSON.stringify(details.contentRatings),
+      networks: JSON.stringify(details.networks),
+      productionCompanies: JSON.stringify(details.productionCompanies),
+      trailers: JSON.stringify(details.trailers),
+      seasons: JSON.stringify(details.seasons),
+      seasonCount: details.numberOfSeasons,
+      episodeCount: details.numberOfEpisodes,
+      homepage: details.homepage,
+      originCountry: JSON.stringify(details.originCountry),
+      originalLanguage: details.originalLanguage,
+      updatedAt: new Date().toISOString(),
+    },
+  });
+
+  // Save provider-specific credits
+  await saveProviderCredits(db, 'show', showId, provider, details.cast, details.crew);
+}
+
+/**
+ * Save provider-specific cast and crew credits.
+ */
+async function saveProviderCredits(
+  db: Database,
+  mediaType: 'movie' | 'show',
+  mediaId: string,
+  provider: string,
+  cast: MovieDetails['cast'],
+  crew: MovieDetails['crew']
+): Promise<void> {
+  // Delete existing credits for this media+provider
+  await db.delete(providerCredits)
+    .where(and(
+      eq(providerCredits.mediaType, mediaType),
+      eq(providerCredits.mediaId, mediaId),
+      eq(providerCredits.provider, provider as 'tmdb' | 'tvdb' | 'anidb' | 'anilist' | 'mal' | 'omdb' | 'trakt')
+    ));
+
+  // Save cast
+  for (const member of cast) {
+    await db.insert(providerCredits).values({
+      id: generateId(),
+      mediaType,
+      mediaId,
+      provider: provider as 'tmdb' | 'tvdb' | 'anidb' | 'anilist' | 'mal' | 'omdb' | 'trakt',
+      roleType: 'cast',
+      name: member.name,
+      externalPersonId: member.id,
+      profilePath: member.profilePath,
+      character: member.character,
+      creditOrder: member.order,
+    });
+  }
+
+  // Save crew (limit to important roles)
+  const importantJobs = ['Director', 'Writer', 'Screenplay', 'Producer', 'Executive Producer', 'Creator'];
+  const importantCrew = crew.filter(c => importantJobs.includes(c.job));
+  
+  for (const member of importantCrew) {
+    await db.insert(providerCredits).values({
+      id: generateId(),
+      mediaType,
+      mediaId,
+      provider: provider as 'tmdb' | 'tvdb' | 'anidb' | 'anilist' | 'mal' | 'omdb' | 'trakt',
+      roleType: 'crew',
+      name: member.name,
+      externalPersonId: member.id,
+      profilePath: member.profilePath,
+      department: member.department,
+      job: member.job,
+    });
+  }
+}
+
+/**
+ * Save all external IDs from the merged external IDs object.
+ */
+async function saveAllExternalIds(
+  db: Database,
+  mediaType: 'movie' | 'show',
+  mediaId: string,
+  ids: ExternalIds
+): Promise<void> {
+  const idMap: Array<{ provider: string; externalId: string | number | undefined }> = [
+    { provider: 'tmdb', externalId: ids.tmdb },
+    { provider: 'imdb', externalId: ids.imdb },
+    { provider: 'tvdb', externalId: ids.tvdb },
+    { provider: 'trakt', externalId: ids.trakt },
+    { provider: 'anidb', externalId: ids.anidb },
+    { provider: 'anilist', externalId: ids.anilist },
+    { provider: 'mal', externalId: ids.mal },
+  ];
+
+  for (const { provider, externalId } of idMap) {
+    if (externalId !== undefined) {
+      await db.insert(externalIds).values({
+        mediaType,
+        mediaId,
+        provider: provider as 'tmdb' | 'imdb' | 'tvdb' | 'trakt' | 'anidb' | 'anilist' | 'mal',
+        externalId: String(externalId),
+      }).onConflictDoUpdate({
+        target: [externalIds.mediaType, externalIds.mediaId, externalIds.provider],
+        set: {
+          externalId: String(externalId),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    }
+  }
+}
+
+/**
  * Save movie ratings from aggregator
  */
 async function saveMovieRatings(
@@ -546,16 +886,79 @@ function normalizeRating(source: string, score: number): number {
 }
 
 /**
- * Fetch metadata for a TV show
+ * Save show ratings from aggregator
+ */
+async function saveShowRatings(
+  db: Database,
+  showId: string,
+  ratings: NonNullable<Awaited<ReturnType<MetadataManager['fetchShowRatings']>>>
+): Promise<void> {
+  const ratingEntries: Array<{
+    source: string;
+    score: number;
+    voteCount?: number;
+  }> = [];
+
+  if (ratings.imdb) {
+    ratingEntries.push({ source: 'imdb', score: ratings.imdb.score, voteCount: ratings.imdb.voteCount });
+  }
+  if (ratings.tmdb) {
+    ratingEntries.push({ source: 'tmdb', score: ratings.tmdb.score, voteCount: ratings.tmdb.voteCount });
+  }
+  if (ratings.rottenTomatoesCritics) {
+    ratingEntries.push({ source: 'rt_critics', score: ratings.rottenTomatoesCritics.score, voteCount: ratings.rottenTomatoesCritics.voteCount });
+  }
+  if (ratings.rottenTomatoesAudience) {
+    ratingEntries.push({ source: 'rt_audience', score: ratings.rottenTomatoesAudience.score, voteCount: ratings.rottenTomatoesAudience.voteCount });
+  }
+  if (ratings.metacritic) {
+    ratingEntries.push({ source: 'metacritic', score: ratings.metacritic.score, voteCount: ratings.metacritic.voteCount });
+  }
+  if (ratings.letterboxd) {
+    ratingEntries.push({ source: 'letterboxd', score: ratings.letterboxd.score, voteCount: ratings.letterboxd.voteCount });
+  }
+  if (ratings.trakt) {
+    ratingEntries.push({ source: 'trakt', score: ratings.trakt.score, voteCount: ratings.trakt.voteCount });
+  }
+
+  for (const entry of ratingEntries) {
+    await db.insert(mediaRatings).values({
+      mediaType: 'show',
+      mediaId: showId,
+      source: entry.source as 'imdb' | 'rt_critics' | 'rt_audience' | 'metacritic' | 'letterboxd' | 'trakt' | 'tmdb',
+      score: entry.score,
+      scoreNormalized: normalizeRating(entry.source, entry.score),
+      voteCount: entry.voteCount,
+    }).onConflictDoUpdate({
+      target: [mediaRatings.mediaType, mediaRatings.mediaId, mediaRatings.source],
+      set: {
+        score: entry.score,
+        scoreNormalized: normalizeRating(entry.source, entry.score),
+        voteCount: entry.voteCount,
+        updatedAt: new Date().toISOString(),
+      },
+    });
+  }
+}
+
+/**
+ * Fetch metadata for a TV show from ALL configured providers.
+ * 
+ * This uses the new multi-provider architecture:
+ * 1. Fetches metadata from ALL enabled providers in parallel
+ * 2. Stores each provider's data in provider_metadata table
+ * 3. Updates the main tvShows table with the default provider's data
+ * 4. Enables instant provider switching in the UI
  */
 export async function fetchShowMetadata(
   db: Database,
   showId: string,
   title?: string,
-  year?: number
+  year?: number,
+  forceRefresh = false
 ): Promise<MetadataFetchResult> {
   const log = logger.child({ showId });
-  log.info('Fetching show metadata');
+  log.info('Fetching show metadata from all providers');
 
   const manager = getMetadataManager();
 
@@ -572,8 +975,8 @@ export async function fetchShowMetadata(
   const searchTitle = title ?? show.title;
   const searchYear = year ?? show.year ?? undefined;
 
-  // Skip if already matched
-  if (show.matchStatus === 'matched') {
+  // Skip if already matched and not forcing refresh
+  if (show.matchStatus === 'matched' && !forceRefresh) {
     log.info('Show already matched, skipping');
     return { 
       matched: true, 
@@ -585,13 +988,11 @@ export async function fetchShowMetadata(
   }
 
   try {
-    // Fetch complete metadata
-    const { details, result } = await manager.fetchCompleteShowMetadata(
-      searchTitle,
-      searchYear
-    );
+    // Fetch metadata from ALL providers
+    const { providerData, ratings, result, externalIds: allExternalIds } = 
+      await manager.fetchAllShowProviderMetadata(searchTitle, searchYear);
 
-    if (!result.matched || !details) {
+    if (!result.matched || Object.keys(providerData).length === 0) {
       await db.update(tvShows)
         .set({ matchStatus: 'unmatched' })
         .where(eq(tvShows.id, showId));
@@ -600,8 +1001,46 @@ export async function fetchShowMetadata(
       return { matched: false };
     }
 
-    // Save show metadata
-    await saveShowMetadata(db, showId, details);
+    // Save metadata from EACH provider to provider_metadata table
+    const providersSaved: string[] = [];
+    for (const [provider, details] of Object.entries(providerData)) {
+      try {
+        await saveProviderShowMetadata(db, showId, provider, details);
+        providersSaved.push(provider);
+        log.debug({ provider }, 'Saved provider metadata');
+      } catch (error) {
+        log.error({ error, provider }, 'Failed to save provider metadata');
+      }
+    }
+
+    // Save all external IDs from all providers
+    await saveAllExternalIds(db, 'show', showId, allExternalIds);
+
+    // Get the default display provider (prefer tmdb, fall back to first available)
+    const providerKeys = Object.keys(providerData);
+    const displayProvider = providerData['tmdb'] 
+      ? 'tmdb' 
+      : providerKeys[0];
+
+    if (!displayProvider) {
+      log.error('No providers returned data');
+      return { matched: false };
+    }
+
+    const displayDetails = providerData[displayProvider];
+
+    if (!displayDetails) {
+      log.error('No display details available despite having provider data');
+      return { matched: false };
+    }
+
+    // Save to the main tvShows table for backwards compatibility
+    await saveShowMetadata(db, showId, displayDetails);
+
+    // Save ratings if available
+    if (ratings) {
+      await saveShowRatings(db, showId, ratings);
+    }
 
     // Update show status
     await db.update(tvShows)
@@ -612,17 +1051,24 @@ export async function fetchShowMetadata(
       .where(eq(tvShows.id, showId));
 
     // Extract year from first air date
-    const firstAirYear = details.firstAirDate
-      ? new Date(details.firstAirDate).getFullYear()
+    const firstAirYear = displayDetails.firstAirDate
+      ? new Date(displayDetails.firstAirDate).getFullYear()
       : undefined;
 
-    log.info({ confidence: result.confidence }, 'Show metadata fetched successfully');
+    log.info({ 
+      confidence: result.confidence, 
+      providers: providersSaved,
+      displayProvider,
+    }, 'Show metadata fetched from all providers successfully');
+
     return {
       matched: true,
-      title: details.title,
+      title: displayDetails.title,
       year: firstAirYear,
-      provider: 'tmdb',
-      externalId: String(details.externalIds.tmdb),
+      provider: displayProvider,
+      externalId: displayDetails.externalIds.tmdb 
+        ? String(displayDetails.externalIds.tmdb) 
+        : undefined,
     };
   } catch (error) {
     log.error({ error }, 'Failed to fetch show metadata');
@@ -638,6 +1084,9 @@ async function saveShowMetadata(
   showId: string,
   details: ShowDetails
 ): Promise<void> {
+  // Extract genre names for the JSON column
+  const genreNames = details.genres.map((g) => g.name);
+
   // Update show record
   await db.update(tvShows)
     .set({
@@ -649,15 +1098,17 @@ async function saveShowMetadata(
       lastAirDate: details.lastAirDate,
       status: details.status,
       network: details.networks?.[0]?.name,
+      networkLogoPath: details.networks?.[0]?.logoPath,
       voteAverage: details.voteAverage,
       voteCount: details.voteCount,
       posterPath: details.posterPath,
       backdropPath: details.backdropPath,
+      genres: JSON.stringify(genreNames), // Store genres as JSON array for filtering
       updatedAt: new Date().toISOString(),
     })
     .where(eq(tvShows.id, showId));
 
-  // Save genres
+  // Save genres to normalized table
   if (details.genres.length > 0) {
     await saveShowGenres(db, showId, details.genres);
   }
@@ -672,8 +1123,129 @@ async function saveShowMetadata(
     await saveTrailers(db, 'tvshow', showId, details.trailers);
   }
 
+  // Save cast/crew
+  if ((details.cast?.length ?? 0) > 0 || (details.crew?.length ?? 0) > 0) {
+    await saveShowCredits(db, showId, details.cast ?? [], details.crew ?? []);
+  }
+
   // Save external IDs
   await saveExternalIds(db, 'show', showId, details.externalIds);
+
+  // Fetch and save season/episode metadata
+  if (details.externalIds.tmdb) {
+    await saveSeasonAndEpisodeMetadata(db, showId, String(details.externalIds.tmdb));
+  }
+}
+
+/**
+ * Fetch and save season and episode metadata from TMDB
+ */
+async function saveSeasonAndEpisodeMetadata(
+  db: Database,
+  showId: string,
+  tmdbShowId: string
+): Promise<void> {
+  const log = logger.child({ showId, tmdbShowId });
+  log.info('Fetching season and episode metadata');
+
+  const manager = getMetadataManager();
+  const tmdb = manager.getIntegration<MetadataIntegration>('tmdb');
+
+  if (!tmdb) {
+    log.warn('TMDB integration not available, skipping episode metadata');
+    return;
+  }
+
+  // Get all seasons for this show from our database
+  const dbSeasons = await db.query.seasons.findMany({
+    where: eq(seasons.showId, showId),
+  });
+
+  for (const dbSeason of dbSeasons) {
+    try {
+      // Fetch season details from TMDB (includes episodes)
+      const seasonDetails = await tmdb.getSeasonDetails(tmdbShowId, dbSeason.seasonNumber);
+
+      // Update season record
+      await db.update(seasons)
+        .set({
+          tmdbId: seasonDetails.externalIds.tmdb,
+          name: seasonDetails.name,
+          overview: seasonDetails.overview,
+          airDate: seasonDetails.airDate,
+          posterPath: seasonDetails.posterPath,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(seasons.id, dbSeason.id));
+
+      // Get all episodes for this season from our database
+      const dbEpisodes = await db.query.episodes.findMany({
+        where: eq(episodes.seasonId, dbSeason.id),
+      });
+
+      // Match and update episodes by episode number
+      for (const dbEpisode of dbEpisodes) {
+        const tmdbEpisode = seasonDetails.episodes.find(
+          (e) => e.episodeNumber === dbEpisode.episodeNumber
+        );
+
+        if (tmdbEpisode) {
+          await db.update(episodes)
+            .set({
+              tmdbId: tmdbEpisode.externalIds.tmdb,
+              title: tmdbEpisode.title,
+              overview: tmdbEpisode.overview,
+              airDate: tmdbEpisode.airDate,
+              runtime: tmdbEpisode.runtime,
+              stillPath: tmdbEpisode.stillPath,
+              voteAverage: tmdbEpisode.voteAverage,
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(episodes.id, dbEpisode.id));
+
+          // Save episode metadata to provider_episodes table (includes guest stars)
+          await db.insert(providerEpisodes)
+            .values({
+              episodeId: dbEpisode.id,
+              provider: 'tmdb',
+              seasonNumber: dbEpisode.seasonNumber,
+              episodeNumber: dbEpisode.episodeNumber,
+              title: tmdbEpisode.title,
+              overview: tmdbEpisode.overview,
+              airDate: tmdbEpisode.airDate,
+              runtime: tmdbEpisode.runtime,
+              stillPath: tmdbEpisode.stillPath,
+              voteAverage: tmdbEpisode.voteAverage,
+              voteCount: tmdbEpisode.voteCount,
+              guestStars: tmdbEpisode.guestStars ? JSON.stringify(tmdbEpisode.guestStars) : null,
+              crew: tmdbEpisode.crew ? JSON.stringify(tmdbEpisode.crew) : null,
+            })
+            .onConflictDoUpdate({
+              target: [providerEpisodes.episodeId, providerEpisodes.provider],
+              set: {
+                title: tmdbEpisode.title,
+                overview: tmdbEpisode.overview,
+                airDate: tmdbEpisode.airDate,
+                runtime: tmdbEpisode.runtime,
+                stillPath: tmdbEpisode.stillPath,
+                voteAverage: tmdbEpisode.voteAverage,
+                voteCount: tmdbEpisode.voteCount,
+                guestStars: tmdbEpisode.guestStars ? JSON.stringify(tmdbEpisode.guestStars) : null,
+                crew: tmdbEpisode.crew ? JSON.stringify(tmdbEpisode.crew) : null,
+                fetchedAt: new Date().toISOString(),
+              },
+            });
+        }
+      }
+
+      log.debug({ seasonNumber: dbSeason.seasonNumber }, 'Updated season metadata');
+    } catch (error) {
+      log.error({ error, seasonNumber: dbSeason.seasonNumber }, 'Failed to fetch season metadata');
+      // Continue with other seasons
+    }
+  }
+
+  log.info('Season and episode metadata fetch completed');
 }
 
 /**

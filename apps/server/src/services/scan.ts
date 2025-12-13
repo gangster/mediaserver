@@ -183,6 +183,9 @@ async function processResults(
               videoCodec: result.probe?.videoCodec ?? existing.videoCodec,
               audioCodec: result.probe?.audioCodec ?? existing.audioCodec,
               resolution: result.probe?.resolution ?? existing.resolution,
+              mediaStreams: result.probe?.streams ? JSON.stringify(result.probe.streams) : existing.mediaStreams,
+              directPlayable: result.probe?.directPlayable ?? existing.directPlayable,
+              needsTranscode: result.probe?.needsTranscode ?? existing.needsTranscode,
               updatedAt: new Date().toISOString(),
             })
             .where(eq(movies.id, existing.id));
@@ -199,6 +202,9 @@ async function processResults(
             videoCodec: result.probe?.videoCodec,
             audioCodec: result.probe?.audioCodec,
             resolution: result.probe?.resolution,
+            mediaStreams: result.probe?.streams ? JSON.stringify(result.probe.streams) : null,
+            directPlayable: result.probe?.directPlayable,
+            needsTranscode: result.probe?.needsTranscode,
             matchStatus: 'pending',
           });
           stats.added++;
@@ -303,6 +309,9 @@ async function processResults(
                   videoCodec: result.probe?.videoCodec ?? existing.videoCodec,
                   audioCodec: result.probe?.audioCodec ?? existing.audioCodec,
                   resolution: result.probe?.resolution ?? existing.resolution,
+                  mediaStreams: result.probe?.streams ? JSON.stringify(result.probe.streams) : existing.mediaStreams,
+                  directPlayable: result.probe?.directPlayable ?? existing.directPlayable,
+                  needsTranscode: result.probe?.needsTranscode ?? existing.needsTranscode,
                   updatedAt: new Date().toISOString(),
                 })
                 .where(eq(episodes.id, existing.id));
@@ -320,6 +329,9 @@ async function processResults(
                 videoCodec: result.probe?.videoCodec,
                 audioCodec: result.probe?.audioCodec,
                 resolution: result.probe?.resolution,
+                mediaStreams: result.probe?.streams ? JSON.stringify(result.probe.streams) : null,
+                directPlayable: result.probe?.directPlayable,
+                needsTranscode: result.probe?.needsTranscode,
               });
               stats.added++;
             }

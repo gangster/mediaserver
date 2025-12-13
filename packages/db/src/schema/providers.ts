@@ -21,15 +21,23 @@ export const providerConfigs = sqliteTable('provider_configs', {
 
 /**
  * System provider defaults table.
+ * 
+ * Note: Primary provider fields are deprecated. The system now fetches metadata
+ * from ALL configured providers and caches it. Users choose which provider's
+ * metadata to display via displayMovieProvider/displayTvProvider preferences.
  */
 export const systemProviderDefaults = sqliteTable('system_provider_defaults', {
   id: text('id').primaryKey().default('default'),
-  /** @deprecated Use primaryMovieProvider and primaryTvProvider instead */
+  /** @deprecated No longer used - metadata is fetched from all providers */
   primaryProvider: text('primary_provider').default('tmdb'),
-  /** Primary metadata provider for movies */
+  /** @deprecated No longer used - metadata is fetched from all providers */
   primaryMovieProvider: text('primary_movie_provider').notNull().default('tmdb'),
-  /** Primary metadata provider for TV shows */
+  /** @deprecated No longer used - metadata is fetched from all providers */
   primaryTvProvider: text('primary_tv_provider').notNull().default('tmdb'),
+  /** Default provider to display for movies (metadata is cached from all) */
+  displayMovieProvider: text('display_movie_provider').notNull().default('tmdb'),
+  /** Default provider to display for TV shows (metadata is cached from all) */
+  displayTvProvider: text('display_tv_provider').notNull().default('tmdb'),
   enabledRatingSources: text('enabled_rating_sources').notNull().default('["imdb", "rt_critics"]'),
   ratingSourceOrder: text('rating_source_order'),
   updatedAt: text('updated_at')
@@ -39,6 +47,10 @@ export const systemProviderDefaults = sqliteTable('system_provider_defaults', {
 
 /**
  * User provider preferences table.
+ * 
+ * Allows users to override system defaults for which provider's metadata
+ * to display. The actual metadata from all providers is cached in
+ * provider_metadata table.
  */
 export const userProviderPreferences = sqliteTable(
   'user_provider_preferences',
@@ -46,7 +58,12 @@ export const userProviderPreferences = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** @deprecated Use displayMovieProvider and displayTvProvider */
     primaryProvider: text('primary_provider'),
+    /** User's preferred provider for displaying movie metadata */
+    displayMovieProvider: text('display_movie_provider'),
+    /** User's preferred provider for displaying TV show metadata */
+    displayTvProvider: text('display_tv_provider'),
     enabledRatingSources: text('enabled_rating_sources'),
     ratingSourceOrder: text('rating_source_order'),
     traktSyncEnabled: integer('trakt_sync_enabled', { mode: 'boolean' }).default(false),

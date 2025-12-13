@@ -20,6 +20,8 @@ export {
   useMovieYears,
   useMarkMovieWatched,
   useMarkMovieUnwatched,
+  useMovieFileStats,
+  useMovieCredits,
 } from './useMovies.js';
 export type { UseMoviesOptions } from './useMovies.js';
 
@@ -36,6 +38,7 @@ export {
   useMarkEpisodeWatched,
   useMarkEpisodeUnwatched,
   useMarkSeasonWatched,
+  useShowCredits,
 } from './useShows.js';
 export type { UseShowsOptions } from './useShows.js';
 
@@ -105,8 +108,11 @@ export {
   useRefreshAllMetadata,
   useUnmatchedItems,
   useMetadataStats,
+  useAvailableProviders,
+  useProviderMetadata,
+  useProviderCredits,
 } from './useMetadata.js';
-export type { UseMetadataSearchOptions, UseUnmatchedOptions } from './useMetadata.js';
+export type { UseMetadataSearchOptions, UseUnmatchedOptions, MetadataProvider } from './useMetadata.js';
 
 // Integration hooks
 export {

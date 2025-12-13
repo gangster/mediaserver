@@ -2,10 +2,10 @@
  * Library Management Page
  */
 
-import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, useWindowDimensions } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { View, Text, Pressable, ScrollView, useWindowDimensions, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { useLibraries } from '@mediaserver/api-client';
+import { useLibraries, useRefreshAllMetadata, useActiveJobs } from '@mediaserver/api-client';
 import { trpc } from '@mediaserver/api-client';
 import { Layout } from '../src/components/layout';
 import { LibraryCard } from '../src/components/libraries/LibraryCard';
@@ -24,6 +24,8 @@ export interface Library {
   updatedAt: string;
 }
 
+type RefreshAllStatus = 'idle' | 'queuing' | 'processing' | 'success' | 'error';
+
 export default function LibrariesPage() {
   const { width } = useWindowDimensions();
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -34,6 +36,54 @@ export default function LibrariesPage() {
   const scanAllMutation = trpc.libraries.scanAll.useMutation({
     onSuccess: () => refetch(),
   });
+
+  const refreshAllMetadata = useRefreshAllMetadata();
+  const [refreshAllStatus, setRefreshAllStatus] = useState<RefreshAllStatus>('idle');
+  const [refreshJobIds, setRefreshJobIds] = useState<string[]>([]);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  // Track active jobs to see when our refresh jobs complete
+  const { data: activeJobs } = useActiveJobs();
+
+  // Check if any of our refresh jobs are still active
+  const checkJobsComplete = useCallback(() => {
+    if (refreshJobIds.length === 0 || refreshAllStatus !== 'processing') return;
+
+    const activeJobIds = activeJobs?.map((j: { id: string }) => j.id) ?? [];
+    const stillProcessing = refreshJobIds.some(id => activeJobIds.includes(id));
+
+    if (!stillProcessing) {
+      setRefreshAllStatus('success');
+      setRefreshJobIds([]);
+      refetch();
+      // Reset after showing success
+      setTimeout(() => setRefreshAllStatus('idle'), 4000);
+    }
+  }, [refreshJobIds, refreshAllStatus, activeJobs, refetch]);
+
+  useEffect(() => {
+    checkJobsComplete();
+  }, [checkJobsComplete]);
+
+  const handleRefreshAllMetadata = async () => {
+    if (refreshAllStatus !== 'idle') return;
+    setRefreshAllStatus('queuing');
+    setRefreshError(null);
+    try {
+      const result = await refreshAllMetadata.mutateAsync({});
+      if (result.queued && result.jobIds) {
+        setRefreshJobIds(result.jobIds);
+        setRefreshAllStatus('processing');
+      }
+    } catch (e) {
+      setRefreshAllStatus('error');
+      setRefreshError(e instanceof Error ? e.message : 'Failed to queue jobs');
+      setTimeout(() => {
+        setRefreshAllStatus('idle');
+        setRefreshError(null);
+      }, 5000);
+    }
+  };
 
   const handleAddLibrary = () => {
     setEditingLibrary(null);
@@ -139,8 +189,8 @@ export default function LibrariesPage() {
                 Manage your media libraries and scan for new content
               </Text>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                      <Pressable
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <Pressable
                 onPress={() => scanAllMutation.mutate()}
                 disabled={scanAllMutation.isPending}
                 style={{
@@ -153,10 +203,41 @@ export default function LibrariesPage() {
                   borderRadius: 8,
                   opacity: scanAllMutation.isPending ? 0.5 : 1,
                 }}
-                      >
+              >
                 <Feather name="refresh-cw" size={18} color="#ffffff" />
                 <Text style={{ color: '#ffffff', fontWeight: '500' }}>Scan All</Text>
-                      </Pressable>
+              </Pressable>
+              <Pressable
+                onPress={handleRefreshAllMetadata}
+                disabled={refreshAllStatus !== 'idle'}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingHorizontal: 16,
+                  paddingVertical: 10,
+                  backgroundColor: refreshAllStatus === 'success' ? '#166534' : refreshAllStatus === 'error' ? '#991b1b' : '#27272a',
+                  borderRadius: 8,
+                  opacity: refreshAllStatus === 'queuing' || refreshAllStatus === 'processing' ? 0.7 : 1,
+                }}
+              >
+                {refreshAllStatus === 'queuing' || refreshAllStatus === 'processing' ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : refreshAllStatus === 'success' ? (
+                  <Feather name="check-circle" size={18} color="#22c55e" />
+                ) : refreshAllStatus === 'error' ? (
+                  <Feather name="alert-circle" size={18} color="#ef4444" />
+                ) : (
+                  <Feather name="database" size={18} color="#ffffff" />
+                )}
+                <Text style={{ color: '#ffffff', fontWeight: '500' }}>
+                  {refreshAllStatus === 'queuing' ? 'Queuing Jobs...' :
+                   refreshAllStatus === 'processing' ? `Refreshing (${refreshJobIds.length} jobs)...` :
+                   refreshAllStatus === 'success' ? 'Metadata Updated!' :
+                   refreshAllStatus === 'error' ? 'Refresh Failed' :
+                   'Refresh All Metadata'}
+                </Text>
+              </Pressable>
               <Pressable
                 onPress={handleAddLibrary}
                 style={{
@@ -171,11 +252,11 @@ export default function LibrariesPage() {
               >
                 <Feather name="plus" size={18} color="#ffffff" />
                 <Text style={{ color: '#ffffff', fontWeight: '500' }}>Add Library</Text>
-                      </Pressable>
-                    </View>
+              </Pressable>
+            </View>
                   </View>
 
-          {/* Success message */}
+          {/* Success messages */}
           {scanAllMutation.isSuccess && (
             <View
               style={{
@@ -192,6 +273,64 @@ export default function LibrariesPage() {
             >
               <Feather name="check" size={18} color="#34d399" />
               <Text style={{ color: '#6ee7b7' }}>Scan started for {scanAllMutation.data?.count} libraries</Text>
+            </View>
+          )}
+          {refreshAllStatus === 'processing' && (
+            <View
+              style={{
+                marginBottom: 24,
+                padding: 16,
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                borderWidth: 1,
+                borderColor: 'rgba(59, 130, 246, 0.3)',
+                borderRadius: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <ActivityIndicator size="small" color="#3b82f6" />
+              <Text style={{ color: '#93c5fd' }}>
+                Refreshing metadata... ({refreshJobIds.length} {refreshJobIds.length === 1 ? 'job' : 'jobs'} in progress)
+              </Text>
+            </View>
+          )}
+          {refreshAllStatus === 'success' && (
+            <View
+              style={{
+                marginBottom: 24,
+                padding: 16,
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                borderWidth: 1,
+                borderColor: 'rgba(16, 185, 129, 0.3)',
+                borderRadius: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <Feather name="check" size={18} color="#34d399" />
+              <Text style={{ color: '#6ee7b7' }}>
+                All metadata refresh jobs completed successfully!
+              </Text>
+            </View>
+          )}
+          {refreshError && (
+            <View
+              style={{
+                marginBottom: 24,
+                padding: 16,
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderWidth: 1,
+                borderColor: 'rgba(239, 68, 68, 0.3)',
+                borderRadius: 8,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <Feather name="alert-circle" size={18} color="#f87171" />
+              <Text style={{ color: '#fca5a5' }}>{refreshError}</Text>
             </View>
           )}
 

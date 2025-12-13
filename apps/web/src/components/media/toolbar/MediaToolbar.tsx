@@ -3,19 +3,22 @@
  *
  * Unified toolbar for Movies/Shows pages with search, sort, filter,
  * view mode toggle icons, and pagination display.
- * Adapted from forreel for React Native Web.
+ * Uses shared UI components for consistency.
  */
 
 import { useState, useCallback } from 'react';
 import { View, Text, Pressable, TextInput, type ViewStyle } from 'react-native';
-import { Ionicons, Feather } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { usePreferencesStore, type MoviesViewMode, type ShowsViewMode } from '../../../stores/preferences';
+import {
+  FilterDropdown,
+  Pagination,
+  ViewModeToggle,
+  type FilterOption,
+  type ViewMode,
+} from '../../ui';
 
-export interface FilterOption {
-  value: string;
-  label: string;
-  count?: number;
-}
+export type { FilterOption };
 
 export interface MediaToolbarProps {
   /** Type of media (movies or shows) */
@@ -48,148 +51,6 @@ export interface MediaToolbarProps {
   onPageChange: (offset: number) => void;
 }
 
-type ViewMode = MoviesViewMode | ShowsViewMode;
-
-/** View mode definitions */
-const viewModeOrder: ViewMode[] = ['poster', 'posterCard', 'list', 'thumb', 'thumbCard', 'banner'];
-
-/** View mode icon component */
-function ViewModeIcon({ mode, color }: { mode: ViewMode; color: string }) {
-  const size = 20;
-
-  switch (mode) {
-    case 'poster':
-      return <Ionicons name="grid-outline" size={size} color={color} />;
-    case 'posterCard':
-      return <Ionicons name="albums-outline" size={size} color={color} />;
-    case 'list':
-      return <Feather name="list" size={size} color={color} />;
-    case 'thumb':
-      return <Ionicons name="apps-outline" size={size} color={color} />;
-    case 'thumbCard':
-      return <Ionicons name="layers-outline" size={size} color={color} />;
-    case 'banner':
-      return <Feather name="sidebar" size={size} color={color} style={{ transform: [{ rotate: '90deg' }] }} />;
-    default:
-      return <Ionicons name="grid-outline" size={size} color={color} />;
-  }
-}
-
-/** Filter dropdown component */
-function FilterDropdown({
-  label,
-  options,
-  selected,
-  onChange,
-  allLabel = 'All',
-}: {
-  label: string;
-  options: FilterOption[];
-  selected?: string;
-  onChange: (value: string | undefined) => void;
-  allLabel?: string;
-}) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  const buttonStyle: ViewStyle = {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: selected ? '#10b981' : '#27272a',
-  };
-
-  return (
-    <View style={{ position: 'relative', zIndex: isOpen ? 100 : 1 }}>
-      <Pressable onPress={() => setIsOpen(!isOpen)} style={buttonStyle}>
-        <Text style={{ color: selected ? '#fff' : '#d4d4d8', fontSize: 14 }}>
-          {selected || label}
-        </Text>
-        <Ionicons
-          name={isOpen ? 'chevron-up' : 'chevron-down'}
-          size={16}
-          color={selected ? '#fff' : '#d4d4d8'}
-        />
-      </Pressable>
-
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <Pressable
-            onPress={() => setIsOpen(false)}
-            style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: 10,
-            } as ViewStyle}
-          />
-          {/* Dropdown */}
-          <View
-            style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              marginTop: 4,
-              width: 192,
-              maxHeight: 256,
-              backgroundColor: '#27272a',
-              borderWidth: 1,
-              borderColor: '#3f3f46',
-              borderRadius: 8,
-              overflow: 'hidden',
-              zIndex: 20,
-              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
-            } as ViewStyle}
-          >
-            {/* All option */}
-            <Pressable
-              onPress={() => {
-                onChange(undefined);
-                setIsOpen(false);
-              }}
-              style={{
-                paddingHorizontal: 12,
-                paddingVertical: 8,
-                backgroundColor: !selected ? '#10b981' : 'transparent',
-              }}
-            >
-              <Text style={{ color: !selected ? '#fff' : '#d4d4d8', fontSize: 14 }}>{allLabel}</Text>
-            </Pressable>
-            {options.map((option) => (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  onChange(option.value);
-                  setIsOpen(false);
-                }}
-                style={{
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  backgroundColor: selected === option.value ? '#10b981' : 'transparent',
-                }}
-              >
-                <Text style={{ color: selected === option.value ? '#fff' : '#d4d4d8', fontSize: 14 }}>
-                  {option.label}
-                </Text>
-                {option.count !== undefined && (
-                  <Text style={{ color: '#71717a', fontSize: 14 }}>{option.count}</Text>
-                )}
-              </Pressable>
-            ))}
-          </View>
-        </>
-      )}
-    </View>
-  );
-}
-
 /** Sort dropdown component */
 function SortDropdown({
   options,
@@ -207,17 +68,17 @@ function SortDropdown({
     <View style={{ position: 'relative', zIndex: isOpen ? 100 : 1 }}>
       <Pressable
         onPress={() => setIsOpen(!isOpen)}
-        style={{
+        style={({ pressed }) => ({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
           paddingHorizontal: 12,
           paddingVertical: 8,
           borderRadius: 8,
-          backgroundColor: '#27272a',
+          backgroundColor: pressed ? '#3f3f46' : '#27272a',
           borderWidth: 1,
           borderColor: '#3f3f46',
-        }}
+        })}
       >
         <Text style={{ color: '#d4d4d8', fontSize: 14 }}>{selectedOption?.label || 'Sort'}</Text>
         <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} color="#d4d4d8" />
@@ -244,14 +105,18 @@ function SortDropdown({
               top: '100%',
               left: 0,
               marginTop: 4,
-              width: 180,
+              minWidth: 180,
               backgroundColor: '#27272a',
               borderWidth: 1,
               borderColor: '#3f3f46',
               borderRadius: 8,
               overflow: 'hidden',
               zIndex: 20,
-              boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.3,
+              shadowRadius: 15,
+              elevation: 10,
             } as ViewStyle}
           >
             {options.map((option) => (
@@ -261,13 +126,23 @@ function SortDropdown({
                   onChange(option.value);
                   setIsOpen(false);
                 }}
-                style={{
+                style={({ pressed }) => ({
                   paddingHorizontal: 12,
-                  paddingVertical: 8,
-                  backgroundColor: selected === option.value ? '#10b981' : 'transparent',
-                }}
+                  paddingVertical: 10,
+                  backgroundColor:
+                    selected === option.value
+                      ? '#10b981'
+                      : pressed
+                        ? '#3f3f46'
+                        : 'transparent',
+                })}
               >
-                <Text style={{ color: selected === option.value ? '#fff' : '#d4d4d8', fontSize: 14 }}>
+                <Text
+                  style={{
+                    color: selected === option.value ? '#fff' : '#d4d4d8',
+                    fontSize: 14,
+                  }}
+                >
                   {option.label}
                 </Text>
               </Pressable>
@@ -308,32 +183,22 @@ export function MediaToolbar({
   } = usePreferencesStore();
 
   const viewMode = mediaType === 'movies' ? moviesViewMode : showsViewMode;
-  const setViewMode = mediaType === 'movies' ? setMoviesViewMode : setShowsViewMode;
-
-  // Calculate pagination
-  const currentPage = Math.floor(offset / limit) + 1;
-  const totalPages = Math.ceil(total / limit);
-  const startItem = total > 0 ? offset + 1 : 0;
-  const endItem = Math.min(offset + limit, total);
-
-  const handlePrevPage = useCallback(() => {
-    if (offset > 0) {
-      onPageChange(Math.max(0, offset - limit));
-    }
-  }, [offset, limit, onPageChange]);
-
-  const handleNextPage = useCallback(() => {
-    if (offset + limit < total) {
-      onPageChange(offset + limit);
-    }
-  }, [offset, limit, total, onPageChange]);
+  const setViewMode = mediaType === 'movies'
+    ? (mode: ViewMode) => setMoviesViewMode(mode as MoviesViewMode)
+    : (mode: ViewMode) => setShowsViewMode(mode as ShowsViewMode);
 
   const hasActiveFilters = selectedGenre || selectedYear || searchQuery;
 
+  const handleClearFilters = useCallback(() => {
+    onSearchChange('');
+    onGenreChange(undefined);
+    onYearChange(undefined);
+  }, [onSearchChange, onGenreChange, onYearChange]);
+
   return (
-    <View style={{ gap: 16 }}>
+    <View style={{ gap: 16, zIndex: 100 }}>
       {/* Main toolbar row */}
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, zIndex: 100 }}>
         {/* Search */}
         <View
           style={{
@@ -411,12 +276,12 @@ export function MediaToolbar({
         {/* Clear filters */}
         {hasActiveFilters && (
           <Pressable
-            onPress={() => {
-              onSearchChange('');
-              onGenreChange(undefined);
-              onYearChange(undefined);
-            }}
-            style={{ paddingHorizontal: 12, paddingVertical: 8 }}
+            onPress={handleClearFilters}
+            style={({ pressed }) => ({
+              paddingHorizontal: 12,
+              paddingVertical: 8,
+              opacity: pressed ? 0.7 : 1,
+            })}
           >
             <Text style={{ color: '#71717a', fontSize: 14 }}>Clear filters</Text>
           </Pressable>
@@ -425,65 +290,19 @@ export function MediaToolbar({
         {/* Spacer */}
         <View style={{ flex: 1 }} />
 
-        {/* Pagination info */}
-        {total > 0 && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Pressable
-              onPress={handlePrevPage}
-              disabled={currentPage === 1}
-              style={{
-                padding: 4,
-                borderRadius: 4,
-                opacity: currentPage === 1 ? 0.3 : 1,
-              }}
-            >
-              <Feather name="chevron-left" size={20} color="#a1a1aa" />
-            </Pressable>
-            <Text style={{ color: '#a1a1aa', fontSize: 14 }}>
-              {startItem}-{endItem} of {total}
-            </Text>
-            <Pressable
-              onPress={handleNextPage}
-              disabled={currentPage === totalPages}
-              style={{
-                padding: 4,
-                borderRadius: 4,
-                opacity: currentPage === totalPages ? 0.3 : 1,
-              }}
-            >
-              <Feather name="chevron-right" size={20} color="#a1a1aa" />
-            </Pressable>
-          </View>
-        )}
+        {/* Pagination */}
+        <Pagination
+          total={total}
+          offset={offset}
+          limit={limit}
+          onPageChange={onPageChange}
+        />
 
         {/* View mode toggles */}
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 4,
-            padding: 4,
-            backgroundColor: '#27272a',
-            borderRadius: 8,
-          }}
-        >
-          {viewModeOrder.map((mode) => {
-            const isActive = viewMode === mode;
-            return (
-              <Pressable
-                key={mode}
-                onPress={() => setViewMode(mode)}
-                style={{
-                  padding: 8,
-                  borderRadius: 4,
-                  backgroundColor: isActive ? '#10b981' : 'transparent',
-                }}
-              >
-                <ViewModeIcon mode={mode} color={isActive ? '#fff' : '#71717a'} />
-              </Pressable>
-            );
-          })}
-        </View>
+        <ViewModeToggle
+          activeMode={viewMode}
+          onModeChange={setViewMode}
+        />
       </View>
     </View>
   );

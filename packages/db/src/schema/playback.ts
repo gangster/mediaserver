@@ -16,6 +16,8 @@ export const watchProgress = sqliteTable('watch_progress', {
     .references(() => users.id, { onDelete: 'cascade' }),
   mediaType: text('media_type', { enum: ['movie', 'episode'] }).notNull(),
   mediaId: text('media_id').notNull(),
+  /** User's preferred version ID (for movies/episodes with multiple file versions) */
+  preferredVersionId: text('preferred_version_id'),
   position: integer('position').notNull().default(0),
   duration: integer('duration').notNull().default(0),
   percentage: real('percentage').notNull().default(0),

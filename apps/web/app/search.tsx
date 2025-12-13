@@ -11,6 +11,7 @@ import { Layout } from '../src/components/layout';
 import { useSearch } from '@mediaserver/api-client';
 import { useDebounce } from '../src/hooks';
 import { MediaCard, SkeletonMediaCard } from '@mediaserver/ui';
+import { getMediaImageUrl } from '../src/lib/config';
 
 export default function SearchPage() {
   const router = useRouter();
@@ -153,7 +154,7 @@ export default function SearchPage() {
                     <MediaCard
                       posterUrl={
                         item.posterPath
-                          ? `http://localhost:3000/api/images/${item.type === 'movie' ? 'movies' : 'shows'}/${item.id}/poster?size=medium`
+                          ? getMediaImageUrl(item.type === 'movie' ? 'movies' : 'shows', item.id, 'poster', 'medium')
                           : null
                       }
                       title={item.title}
@@ -169,3 +170,4 @@ export default function SearchPage() {
     </Layout>
   );
 }
+

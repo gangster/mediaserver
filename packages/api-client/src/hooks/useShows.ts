@@ -94,3 +94,13 @@ export function useMarkSeasonWatched() {
   return trpc.shows.markSeasonWatched.useMutation();
 }
 
+/**
+ * Hook for fetching cast and crew for a TV show.
+ */
+export function useShowCredits(id: string, options?: { maxCast?: number; maxCrew?: number }, enabled = true) {
+  return trpc.shows.getCredits.useQuery(
+    { id, ...options },
+    { enabled: enabled && !!id }
+  );
+}
+

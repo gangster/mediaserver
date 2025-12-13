@@ -252,7 +252,7 @@ export default function TVShowsPage() {
           </View>
 
           {/* Toolbar */}
-          <View style={{ marginBottom: 24 }}>
+          <View style={{ marginBottom: 24, zIndex: 100 }}>
             <MediaToolbar
               mediaType="shows"
               total={filteredItems.length}

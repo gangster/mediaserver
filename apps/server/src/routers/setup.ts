@@ -12,7 +12,7 @@ import {
   users,
   libraries,
   settings,
-  metadataProviders,
+  providerConfigs,
   privacySettings,
   refreshTokens,
   eq,
@@ -26,6 +26,9 @@ import {
 } from '../lib/auth.js';
 import { generateId } from '@mediaserver/core';
 import type { UserRole } from '@mediaserver/core';
+import { initializeMetadataManager } from '../services/metadata.js';
+import { queueManager, QUEUE_NAMES } from '../jobs/index.js';
+import { logger } from '../lib/logger.js';
 
 /** Settings keys */
 const SETUP_COMPLETE_KEY = 'setup_complete';
@@ -171,8 +174,8 @@ export const setupRouter = router({
     // Check if any metadata provider is configured
     const [providerCount] = await ctx.db
       .select({ count: count() })
-      .from(metadataProviders)
-      .where(eq(metadataProviders.enabled, true));
+      .from(providerConfigs)
+      .where(eq(providerConfigs.enabled, true));
 
     const hasMetadataProvider = (providerCount?.count ?? 0) > 0;
 
@@ -327,11 +330,11 @@ export const setupRouter = router({
    */
   getMetadataProviders: publicProcedure.query(async ({ ctx }) => {
     // Get configured providers
-    const configured = await ctx.db.select().from(metadataProviders);
+    const configured = await ctx.db.select().from(providerConfigs);
 
     // Merge with available providers
     return METADATA_PROVIDERS.map((provider) => {
-      const config = configured.find((c) => c.id === provider.id);
+      const config = configured.find((c) => c.providerId === provider.id);
       return {
         ...provider,
         configured: !!config?.apiKey,
@@ -357,6 +360,7 @@ export const setupRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const now = new Date().toISOString();
+      const log = logger.child({ context: 'setup.saveMetadataProviders' });
 
       for (const provider of input.providers) {
         const providerInfo = METADATA_PROVIDERS.find((p) => p.id === provider.id);
@@ -365,31 +369,36 @@ export const setupRouter = router({
         // Upsert provider config
         const existing = await ctx.db
           .select()
-          .from(metadataProviders)
-          .where(eq(metadataProviders.id, provider.id))
+          .from(providerConfigs)
+          .where(eq(providerConfigs.providerId, provider.id))
           .limit(1);
 
         const existingProvider = existing[0];
         if (existingProvider) {
           await ctx.db
-            .update(metadataProviders)
+            .update(providerConfigs)
             .set({
               apiKey: provider.apiKey || existingProvider.apiKey,
               enabled: provider.enabled,
               updatedAt: now,
             })
-            .where(eq(metadataProviders.id, provider.id));
+            .where(eq(providerConfigs.providerId, provider.id));
         } else if (provider.apiKey) {
-          await ctx.db.insert(metadataProviders).values({
-            id: provider.id,
-            name: providerInfo.name,
+          await ctx.db.insert(providerConfigs).values({
+            providerId: provider.id,
             apiKey: provider.apiKey,
             enabled: provider.enabled,
-            priority: METADATA_PROVIDERS.findIndex((p) => p.id === provider.id),
-            createdAt: now,
             updatedAt: now,
           });
         }
+      }
+
+      // Re-initialize metadata manager with new provider configs
+      try {
+        await initializeMetadataManager({}, undefined, ctx.db);
+        log.info('Metadata manager re-initialized with new provider configs');
+      } catch (error) {
+        log.error({ error }, 'Failed to re-initialize metadata manager');
       }
 
       return { success: true };
@@ -439,8 +448,13 @@ export const setupRouter = router({
 
   /**
    * Complete the setup process.
+   * 
+   * This marks setup as complete and triggers initial scans for all libraries
+   * created during the wizard.
    */
   complete: publicProcedure.mutation(async ({ ctx }) => {
+    const log = logger.child({ context: 'setup.complete' });
+
     // Verify minimum requirements
     const [ownerCount] = await ctx.db
       .select({ count: count() })
@@ -469,9 +483,32 @@ export const setupRouter = router({
         set: { value: 'true', updatedAt: now },
       });
 
+    // Queue scans for all libraries if queue is initialized
+    const allLibraries = await ctx.db.select().from(libraries);
+    const scansQueued: string[] = [];
+
+    if (queueManager.isInitialized()) {
+      for (const library of allLibraries) {
+        try {
+          await queueManager.addJob(QUEUE_NAMES.SCAN, {
+            type: 'scan_library',
+            libraryId: library.id,
+            libraryName: library.name,
+          });
+          scansQueued.push(library.name);
+          log.info({ libraryId: library.id, libraryName: library.name }, 'Queued initial library scan');
+        } catch (error) {
+          log.error({ error, libraryId: library.id }, 'Failed to queue library scan');
+        }
+      }
+    } else {
+      log.warn('Job queue not initialized, skipping initial library scans');
+    }
+
     return {
       success: true,
       message: 'Setup complete! Your media server is ready to use.',
+      scansQueued,
     };
   }),
 });
