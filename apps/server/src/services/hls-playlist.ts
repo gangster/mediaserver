@@ -221,12 +221,15 @@ function formatVariant(variant: HLSVariant): string {
 
 /**
  * Create a master playlist from a PlaybackPlan.
+ * 
+ * NOTE: Uses relative URLs so HLS.js resolves them relative to the master playlist
+ * location (which is on the API server), not the page origin (which is the web app).
  */
 export function createMasterPlaylistFromPlan(
   sessionId: string,
   mediaId: string,
   plan: PlaybackPlan,
-  baseUrl: string
+  _baseUrl: string // Unused - we use relative URLs instead
 ): HLSMasterPlaylist {
   const variants: HLSVariant[] = [];
   const audioRenditions: HLSAudioRendition[] = [];
@@ -239,17 +242,17 @@ export function createMasterPlaylistFromPlan(
   // Build codec string
   const codecs = buildCodecString(plan);
 
-  // Main variant
+  // Main variant - use relative URL so HLS.js resolves relative to master playlist
   variants.push({
     bandwidth,
     averageBandwidth: Math.round(bandwidth * 0.8),
     resolution: plan.video.resolution,
     codecs,
     audioGroup: plan.audioGroups ? plan.audioGroups.groupId : undefined,
-    uri: `${baseUrl}/playlist.m3u8`,
+    uri: 'playlist.m3u8', // Relative to master.m3u8
   });
 
-  // Audio renditions (if multi-track)
+  // Audio renditions (if multi-track) - also relative URLs
   if (plan.audioGroups) {
     for (const track of plan.audioGroups.tracks) {
       audioRenditions.push({
@@ -259,7 +262,7 @@ export function createMasterPlaylistFromPlan(
         isDefault: track.isDefault,
         autoSelect: true,
         channels: track.channels,
-        uri: `${baseUrl}/audio_${track.index}/playlist.m3u8`,
+        uri: `audio_${track.index}/playlist.m3u8`, // Relative to master.m3u8
       });
     }
   }
@@ -488,3 +491,4 @@ export function findSegmentAtTime(
   // Return last segment if past end
   return playlist.segments[playlist.segments.length - 1];
 }
+

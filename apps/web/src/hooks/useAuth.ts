@@ -27,20 +27,7 @@ export function useAuth() {
   // Hydrate store on client side
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      // #region agent log
-      const lsBefore = localStorage.getItem('mediaserver-auth');
-      const stateBefore = useAuthStore.getState();
-      fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useAuth.ts:hydrate',message:'BEFORE rehydrate',data:{localStorageAuth:lsBefore,stateTokens:!!stateBefore.tokens,stateUser:!!stateBefore.user},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
-      
       useAuthStore.persist.rehydrate();
-      
-      // #region agent log
-      const lsAfter = localStorage.getItem('mediaserver-auth');
-      const stateAfter = useAuthStore.getState();
-      fetch('http://127.0.0.1:7243/ingest/aaaef955-942a-4465-9782-050361b336a0',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'useAuth.ts:hydrate',message:'AFTER rehydrate',data:{localStorageAuth:lsAfter,stateTokens:!!stateAfter.tokens,stateUser:!!stateAfter.user},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
-      
       setHydrated(true);
     }
   }, []);
@@ -90,4 +77,5 @@ export function useRequireAdmin() {
     shouldRedirect: auth.isInitialized && (!auth.isAuthenticated || !auth.isAdmin),
   };
 }
+
 

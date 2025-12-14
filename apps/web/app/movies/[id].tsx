@@ -500,20 +500,22 @@ export default function MovieDetailPage() {
                 {/* Actions */}
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
                   {/* Play button */}
-                  <Pressable
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 8,
-                      paddingHorizontal: 32,
-                      paddingVertical: 16,
-                      backgroundColor: '#ffffff',
-                      borderRadius: 8,
-                    }}
-                  >
-                    <Ionicons name="play" size={24} color="#000000" />
-                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#000000' }}>Play</Text>
-                  </Pressable>
+                  <Link href={`/watch/movie/${id}` as any} asChild>
+                    <Pressable
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                        paddingHorizontal: 32,
+                        paddingVertical: 16,
+                        backgroundColor: '#ffffff',
+                        borderRadius: 8,
+                      }}
+                    >
+                      <Ionicons name="play" size={24} color="#000000" />
+                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#000000' }}>Play</Text>
+                    </Pressable>
+                  </Link>
 
                   {/* Refresh Metadata (admin only) */}
                   {isAdmin && id && (

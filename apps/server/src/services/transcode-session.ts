@@ -14,6 +14,7 @@ import { EventEmitter } from 'node:events';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdir, rm, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { writePidFile } from './process-cleanup.js';
 import type {
   TranscodeSessionState,
   PlaybackPlan,
@@ -71,8 +72,8 @@ const DEFAULT_CONFIG: SessionConfig = {
   cacheDir: '/tmp/mediaserver/transcode',
   segmentDuration: 4,
   maxSegmentsBehindPlayhead: 5,
-  firstSegmentTimeoutMs: 15000,
-  noProgressTimeoutMs: 30000,
+  firstSegmentTimeoutMs: 45000, // 45 seconds - 4K transcoding can be slow
+  noProgressTimeoutMs: 60000,   // 60 seconds
 };
 
 /**
@@ -95,6 +96,8 @@ export class TranscodeSession extends EventEmitter {
   private currentSegmentIndex: number = 0;
   private firstSegmentTimeout: NodeJS.Timeout | null = null;
   private noProgressTimeout: NodeJS.Timeout | null = null;
+  /** Mutex to prevent concurrent seek operations */
+  private seekInProgress: Promise<void> | null = null;
 
   constructor(
     plan: PlaybackPlan,
@@ -177,10 +180,43 @@ export class TranscodeSession extends EventEmitter {
   /**
    * Seek to a new position.
    * Creates a new epoch with discontinuity.
+   * 
+   * Uses a mutex to prevent concurrent seek operations from spawning multiple FFmpeg processes.
+   * 
+   * @param position - Target position in source file time (seconds)
+   * @param waitForFirstSegment - If true, waits for first segment before returning (default: true)
+   * @returns Promise that resolves when seek is complete and first segment is ready
    */
-  async seek(position: number): Promise<void> {
+  async seek(position: number, waitForFirstSegment: boolean = true): Promise<void> {
+    // Wait for any in-progress seek to complete first
+    if (this.seekInProgress) {
+      logger.info(
+        { sessionId: this.sessionId, position },
+        'Waiting for previous seek to complete'
+      );
+      try {
+        await this.seekInProgress;
+      } catch {
+        // Previous seek failed, continue with new seek
+      }
+    }
+
+    // Create and store the seek promise
+    this.seekInProgress = this.doSeek(position, waitForFirstSegment);
+    
+    try {
+      await this.seekInProgress;
+    } finally {
+      this.seekInProgress = null;
+    }
+  }
+
+  /**
+   * Internal seek implementation.
+   */
+  private async doSeek(position: number, waitForFirstSegment: boolean): Promise<void> {
     logger.info(
-      { sessionId: this.sessionId, position },
+      { sessionId: this.sessionId, position, waitForFirstSegment },
       'Seeking transcode session'
     );
 
@@ -216,6 +252,74 @@ export class TranscodeSession extends EventEmitter {
 
     // Restart FFmpeg at new position
     await this.startFFmpeg(position);
+
+    // Wait for first segment to be ready if requested
+    if (waitForFirstSegment) {
+      await this.waitForFirstSegment();
+    }
+  }
+
+  /**
+   * Wait for the first segment of the current epoch to be ready.
+   * Returns immediately if segments already exist.
+   */
+  private async waitForFirstSegment(): Promise<void> {
+    // Check if we already have segments for this epoch
+    const epochSegments = this.playlist.segments.filter(
+      s => s.epochIndex === this.state.currentEpoch.epochIndex
+    );
+    if (epochSegments.length > 0) {
+      logger.debug({ sessionId: this.sessionId }, 'First segment already available');
+      return;
+    }
+
+    // Wait for segment:ready event
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.removeListener('segment:ready', onSegmentReady);
+        this.removeListener('session:error', onError);
+        reject(new Error('Timeout waiting for first segment after seek'));
+      }, this.config.firstSegmentTimeoutMs);
+
+      const onSegmentReady = (segment: HLSSegment) => {
+        // Only resolve for segments in the current epoch
+        if (segment.epochIndex === this.state.currentEpoch.epochIndex) {
+          clearTimeout(timeout);
+          this.removeListener('segment:ready', onSegmentReady);
+          this.removeListener('session:error', onError);
+          logger.debug(
+            { sessionId: this.sessionId, segmentIndex: segment.index },
+            'First segment ready after seek'
+          );
+          resolve();
+        }
+      };
+
+      const onError = (_sessionId: string, error: Error) => {
+        clearTimeout(timeout);
+        this.removeListener('segment:ready', onSegmentReady);
+        this.removeListener('session:error', onError);
+        reject(error);
+      };
+
+      this.on('segment:ready', onSegmentReady);
+      this.on('session:error', onError);
+    });
+  }
+
+  /**
+   * Get the current transcoded time (end of last segment in current epoch).
+   * Useful for clients to know how far they can seek without server-side restart.
+   */
+  getTranscodedTime(): number {
+    const epochSegments = this.playlist.segments.filter(
+      s => s.epochIndex === this.state.currentEpoch.epochIndex
+    );
+    if (epochSegments.length === 0) {
+      return this.state.currentPositionSeconds;
+    }
+    const lastSegment = epochSegments[epochSegments.length - 1];
+    return lastSegment?.endTime ?? this.state.currentPositionSeconds;
   }
 
   /**
@@ -262,8 +366,9 @@ export class TranscodeSession extends EventEmitter {
   async pause(): Promise<void> {
     logger.info({ sessionId: this.sessionId }, 'Pausing transcode session');
 
-    await this.stopFFmpeg();
+    // Set status before stopping to prevent restart attempts from FFmpeg exit handler
     this.state.status = 'paused';
+    await this.stopFFmpeg();
   }
 
   /**
@@ -289,6 +394,10 @@ export class TranscodeSession extends EventEmitter {
       'Ending transcode session'
     );
 
+    // Set status to 'ending' BEFORE stopping FFmpeg to prevent restart attempts.
+    // This avoids a race condition where FFmpeg exit handler could see 'active' status.
+    this.state.status = 'ending';
+
     // Stop FFmpeg
     await this.stopFFmpeg();
 
@@ -299,7 +408,7 @@ export class TranscodeSession extends EventEmitter {
     this.playlist = finalizePlaylist(this.playlist);
     this.emit('playlist:updated', this.playlist);
 
-    // Update state
+    // Update state to final ended status
     this.state.status = 'ended';
     this.state.endedAt = new Date().toISOString();
 
@@ -396,15 +505,25 @@ export class TranscodeSession extends EventEmitter {
     );
 
     // Spawn FFmpeg
+    // Use detached: false to keep FFmpeg as a child process
+    // This ensures it gets killed when the parent process exits
     this.ffmpegState.status = 'starting';
     this.ffmpegState.startedAt = new Date().toISOString();
 
     const ffmpeg = spawn(args[0] ?? 'ffmpeg', args.slice(1), {
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: false,
     });
 
     this.ffmpegProcess = ffmpeg;
     this.ffmpegState.pid = ffmpeg.pid;
+
+    // Write PID file for tracking (helps with cleanup on restart)
+    if (ffmpeg.pid) {
+      writePidFile(this.outputDir, ffmpeg.pid).catch((err) => {
+        logger.warn({ err, sessionId: this.sessionId }, 'Failed to write FFmpeg PID file');
+      });
+    }
 
     // Set up first segment timeout
     this.setFirstSegmentTimeout();
@@ -506,6 +625,14 @@ export class TranscodeSession extends EventEmitter {
       const segmentFiles = files
         .filter((f) => f.endsWith('.ts'))
         .sort();
+      
+      logger.debug({ 
+        sessionId: this.sessionId, 
+        outputDir: this.outputDir,
+        totalFiles: files.length,
+        segmentFiles: segmentFiles.length,
+        currentSegmentIndex: this.currentSegmentIndex 
+      }, '[TranscodeSession] Checking for segments');
 
       for (const filename of segmentFiles) {
         const index = this.parseSegmentIndex(filename);
@@ -520,7 +647,9 @@ export class TranscodeSession extends EventEmitter {
             index,
             epochIndex: this.state.currentEpoch.epochIndex,
             duration: this.config.segmentDuration,
-            filename,
+            // URL-formatted filename for HLS playlist (matches route pattern)
+            filename: `segment/${index}.ts`,
+            // Actual file path on disk
             path,
             byteSize: stats.size,
             startTime: this.state.currentPositionSeconds + index * this.config.segmentDuration,
@@ -564,7 +693,7 @@ export class TranscodeSession extends EventEmitter {
 
   private handleFFmpegExit(code: number | null): void {
     logger.info(
-      { sessionId: this.sessionId, exitCode: code },
+      { sessionId: this.sessionId, exitCode: code, ffmpegStatus: this.ffmpegState.status },
       'FFmpeg process exited'
     );
 
@@ -574,8 +703,15 @@ export class TranscodeSession extends EventEmitter {
     if (code === 0) {
       // Normal completion
       this.ffmpegState.status = 'stopped';
+    } else if (this.ffmpegState.status === 'stopping') {
+      // Intentionally stopped (during seek, pause, or end) - don't restart
+      this.ffmpegState.status = 'stopped';
+      logger.debug(
+        { sessionId: this.sessionId },
+        'FFmpeg was intentionally stopped, not restarting'
+      );
     } else if (this.state.status === 'active') {
-      // Unexpected exit
+      // Unexpected exit while session is active
       this.ffmpegState.status = 'error';
       this.ffmpegState.errorMessage = `FFmpeg exited with code ${code}`;
 

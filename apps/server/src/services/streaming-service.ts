@@ -11,7 +11,8 @@
  */
 
 import { createReadStream, type ReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { stat, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import type {
   PlaybackPlan,
   ServerCapabilities,
@@ -40,6 +41,7 @@ import {
   createMasterPlaylistFromPlan,
 } from './hls-playlist.js';
 import { logger } from '../lib/logger.js';
+import { performStartupCleanup, killOrphanedFFmpegProcesses } from './process-cleanup.js';
 
 /** Playback session info stored in memory */
 export interface PlaybackSessionInfo {
@@ -78,6 +80,7 @@ export interface CreateSessionResult {
   masterPlaylistUrl: string;
   directPlay: boolean;
   startPosition: number;
+  duration: number;
 }
 
 /** Segment info for streaming */
@@ -93,32 +96,91 @@ export interface SegmentInfo {
  *
  * Central orchestrator for all playback operations.
  */
+/** Configuration for session cleanup */
+export interface StreamingServiceConfig extends Partial<SessionConfig> {
+  /** Idle timeout in milliseconds before a session is cleaned up (default: 60 seconds) */
+  sessionIdleTimeoutMs?: number;
+  /** Interval in milliseconds between cleanup checks (default: 15 seconds) */
+  cleanupIntervalMs?: number;
+}
+
 export class StreamingService {
   private sessions: Map<string, PlaybackSessionInfo> = new Map();
   private transcodeManager: TranscodeSessionManager;
   private serverCaps: ServerCapabilities;
   private db: Database;
   private sessionConfig: SessionConfig;
+  private cleanupInterval: NodeJS.Timeout | null = null;
+  private sessionIdleTimeoutMs: number;
+  private cleanupIntervalMs: number;
 
   constructor(
     db: Database,
     serverCaps: ServerCapabilities,
-    config?: Partial<SessionConfig>
+    config?: StreamingServiceConfig
   ) {
     this.db = db;
     this.serverCaps = serverCaps;
+    
+    // Session idle timeout: 60 seconds without heartbeat = cleanup
+    this.sessionIdleTimeoutMs = config?.sessionIdleTimeoutMs ?? 60_000;
+    // Cleanup interval: check every 15 seconds
+    this.cleanupIntervalMs = config?.cleanupIntervalMs ?? 15_000;
+    
     this.sessionConfig = {
       cacheDir: '/tmp/mediaserver/transcode',
       segmentDuration: 4,
       maxSegmentsBehindPlayhead: 5,
-      firstSegmentTimeoutMs: 15000,
-      noProgressTimeoutMs: 30000,
+      firstSegmentTimeoutMs: 45000, // 45 seconds - 4K transcoding can be slow
+      noProgressTimeoutMs: 60000,   // 60 seconds
       ...config,
     };
     this.transcodeManager = new TranscodeSessionManager(
       serverCaps,
       this.sessionConfig
     );
+    
+    // Start automatic session cleanup
+    this.startCleanupTimer();
+    
+    logger.info(
+      { sessionIdleTimeoutMs: this.sessionIdleTimeoutMs, cleanupIntervalMs: this.cleanupIntervalMs },
+      'StreamingService initialized with automatic session cleanup'
+    );
+  }
+  
+  /**
+   * Start the automatic session cleanup timer.
+   */
+  private startCleanupTimer(): void {
+    // Clear any existing timer
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
+    
+    this.cleanupInterval = setInterval(async () => {
+      try {
+        const cleaned = await this.cleanupExpiredSessions(this.sessionIdleTimeoutMs);
+        if (cleaned > 0) {
+          logger.info({ cleaned, remaining: this.sessions.size }, 'Cleaned up idle sessions');
+        }
+      } catch (error) {
+        logger.error({ error }, 'Error during session cleanup');
+      }
+    }, this.cleanupIntervalMs);
+    
+    // Don't block Node.js from exiting if this is the only timer
+    this.cleanupInterval.unref();
+  }
+  
+  /**
+   * Stop the automatic session cleanup timer.
+   */
+  private stopCleanupTimer(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
   }
 
   /**
@@ -215,6 +277,21 @@ export class StreamingService {
 
     this.sessions.set(sessionId, sessionInfo);
 
+    // Write master playlist to disk (so it can be served statically like FFmpeg's output)
+    const sessionDir = join(this.sessionConfig.cacheDir, sessionId);
+    await mkdir(sessionDir, { recursive: true });
+    
+    const master = createMasterPlaylistFromPlan(
+      sessionId,
+      mediaId,
+      plan,
+      `/api/stream/${sessionId}`
+    );
+    const masterPlaylistContent = generateMasterPlaylist(master);
+    await writeFile(join(sessionDir, 'master.m3u8'), masterPlaylistContent, 'utf-8');
+    
+    logger.debug({ sessionId, sessionDir }, 'Written master playlist to disk');
+
     logger.info(
       {
         sessionId,
@@ -231,6 +308,7 @@ export class StreamingService {
       masterPlaylistUrl: `/api/stream/${sessionId}/master.m3u8`,
       directPlay: plan.mode === 'direct',
       startPosition,
+      duration: probe.format.duration,
     };
   }
 
@@ -238,8 +316,17 @@ export class StreamingService {
    * Get master playlist for a session.
    */
   getMasterPlaylist(sessionId: string): string {
+    logger.info({ 
+      sessionId, 
+      knownSessions: Array.from(this.sessions.keys()) 
+    }, '[StreamingService] getMasterPlaylist called');
+    
     const session = this.sessions.get(sessionId);
     if (!session) {
+      logger.error({ 
+        sessionId, 
+        knownSessions: Array.from(this.sessions.keys()) 
+      }, '[StreamingService] Session not found in memory');
       throw new Error(`Session not found: ${sessionId}`);
     }
 
@@ -252,68 +339,133 @@ export class StreamingService {
       `/api/stream/${sessionId}`
     );
 
-    return generateMasterPlaylist(master);
+    const playlistContent = generateMasterPlaylist(master);
+    logger.info({ 
+      sessionId, 
+      plan: session.plan.mode,
+      playlistContent: playlistContent.substring(0, 500),
+      variantUri: master.variants[0]?.uri 
+    }, '[StreamingService] Generated master playlist');
+    return playlistContent;
   }
 
   /**
    * Get media playlist for a session.
+   * Falls back to reading FFmpeg's generated playlist from disk if session is not in memory.
    */
-  getMediaPlaylist(sessionId: string): string {
+  async getMediaPlaylist(sessionId: string): Promise<string> {
     const session = this.sessions.get(sessionId);
-    if (!session) {
+    
+    // If session is in memory, use existing logic
+    if (session) {
+      session.lastAccessAt = new Date().toISOString();
+
+      // For direct play, generate a simple playlist
+      if (session.plan.mode === 'direct') {
+        const playlist = this.generateDirectPlayPlaylist(session);
+        logger.info({ sessionId, mode: 'direct', playlistLength: playlist.length }, '[StreamingService] getMediaPlaylist returning direct play playlist');
+        return playlist;
+      }
+
+      // For transcoding, get from transcode session
+      if (session.transcodeSession) {
+        const playlist = session.transcodeSession.getPlaylistContent();
+        const segmentCount = (playlist.match(/#EXTINF/g) || []).length;
+        logger.info({ 
+          sessionId, 
+          mode: 'transcode', 
+          segmentCount, 
+          playlistPreview: playlist.substring(0, 500)
+        }, '[StreamingService] getMediaPlaylist returning transcode playlist');
+        return playlist;
+      }
+
+      throw new Error('No playlist available');
+    }
+
+    // Session not in memory - try to read FFmpeg's generated playlist from disk
+    const playlistPath = `${this.sessionConfig.cacheDir}/${sessionId}/playlist.m3u8`;
+    
+    try {
+      const playlistContent = await readFile(playlistPath, 'utf-8');
+      
+      // FFmpeg writes segment filenames as segment_00000.ts but our routes expect segment/{index}.ts
+      // We need to transform the segment references
+      const transformedPlaylist = playlistContent.replace(
+        /segment_(\d{5})\.ts/g,
+        (_, num) => `segment/${parseInt(num, 10)}.ts`
+      );
+      
+      const segmentCount = (transformedPlaylist.match(/#EXTINF/g) || []).length;
+      logger.info({ 
+        sessionId, 
+        mode: 'orphaned', 
+        segmentCount,
+        playlistPath
+      }, '[StreamingService] Serving orphaned playlist from disk');
+      
+      return transformedPlaylist;
+    } catch (error) {
+      logger.warn({ sessionId, playlistPath, error }, '[StreamingService] Playlist not found on disk');
       throw new Error(`Session not found: ${sessionId}`);
     }
-
-    session.lastAccessAt = new Date().toISOString();
-
-    // For direct play, generate a simple playlist
-    if (session.plan.mode === 'direct') {
-      return this.generateDirectPlayPlaylist(session);
-    }
-
-    // For transcoding, get from transcode session
-    if (session.transcodeSession) {
-      return session.transcodeSession.getPlaylistContent();
-    }
-
-    throw new Error('No playlist available');
   }
 
   /**
    * Get segment file for streaming.
+   * Falls back to serving from disk if session is not in memory (e.g., after server restart).
    */
   async getSegment(
     sessionId: string,
     segmentIndex: number
   ): Promise<{ stream: ReadStream; size: number; contentType: string }> {
     const session = this.sessions.get(sessionId);
-    if (!session) {
-      throw new Error(`Session not found: ${sessionId}`);
+    
+    // If session is in memory, use existing logic
+    if (session) {
+      session.lastAccessAt = new Date().toISOString();
+
+      // For direct play, serve file directly with range support
+      if (session.plan.mode === 'direct') {
+        throw new Error('Use range request for direct play');
+      }
+
+      // For transcoding, get segment from transcode session
+      if (session.transcodeSession) {
+        const segmentPath = session.transcodeSession.getSegmentPath(segmentIndex);
+        const stats = await stat(segmentPath);
+
+        return {
+          stream: createReadStream(segmentPath),
+          size: stats.size,
+          contentType:
+            session.plan.container === 'hls_fmp4'
+              ? 'video/mp4'
+              : 'video/MP2T',
+        };
+      }
+
+      throw new Error('Segment not available');
     }
 
-    session.lastAccessAt = new Date().toISOString();
-
-    // For direct play, serve file directly with range support
-    if (session.plan.mode === 'direct') {
-      throw new Error('Use range request for direct play');
-    }
-
-    // For transcoding, get segment from transcode session
-    if (session.transcodeSession) {
-      const segmentPath = session.transcodeSession.getSegmentPath(segmentIndex);
+    // Session not in memory - try to serve from disk (orphaned session after restart)
+    // This allows clients to continue playback after server restart
+    const filename = `segment_${segmentIndex.toString().padStart(5, '0')}.ts`;
+    const segmentPath = `${this.sessionConfig.cacheDir}/${sessionId}/${filename}`;
+    
+    try {
       const stats = await stat(segmentPath);
-
+      logger.debug({ sessionId, segmentIndex, segmentPath }, '[StreamingService] Serving orphaned segment from disk');
+      
       return {
         stream: createReadStream(segmentPath),
         size: stats.size,
-        contentType:
-          session.plan.container === 'hls_fmp4'
-            ? 'video/mp4'
-            : 'video/MP2T',
+        contentType: 'video/MP2T',
       };
+    } catch (error) {
+      logger.warn({ sessionId, segmentIndex, segmentPath, error }, '[StreamingService] Segment not found on disk');
+      throw new Error(`Session not found: ${sessionId}`);
     }
-
-    throw new Error('Segment not available');
   }
 
   /**
@@ -361,8 +513,18 @@ export class StreamingService {
 
   /**
    * Seek to a new position in the session.
+   * For transcoding sessions, this restarts FFmpeg at the new position.
+   * 
+   * @param sessionId - Session ID
+   * @param position - Target position in source file time (seconds)
+   * @returns Seek result with new epoch info
    */
-  async seek(sessionId: string, position: number): Promise<void> {
+  async seek(sessionId: string, position: number): Promise<{
+    success: boolean;
+    epochIndex: number;
+    startPosition: number;
+    transcodedTime: number;
+  }> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
@@ -371,9 +533,45 @@ export class StreamingService {
     session.lastAccessAt = new Date().toISOString();
     session.startPosition = position;
 
+    let epochIndex = 0;
+    let transcodedTime = position;
+
     if (session.transcodeSession) {
-      await session.transcodeSession.seek(position);
+      // This will wait for the first segment to be ready
+      await session.transcodeSession.seek(position, true);
+      epochIndex = session.transcodeSession.getState().currentEpoch.epochIndex;
+      transcodedTime = session.transcodeSession.getTranscodedTime();
     }
+
+    logger.info(
+      { sessionId, position, epochIndex, transcodedTime },
+      'Seek completed'
+    );
+
+    return {
+      success: true,
+      epochIndex,
+      startPosition: position,
+      transcodedTime,
+    };
+  }
+
+  /**
+   * Get the current transcoded time for a session.
+   * Returns how far the transcode has progressed (in source file time).
+   */
+  getTranscodedTime(sessionId: string): number | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return null;
+    }
+
+    if (session.transcodeSession) {
+      return session.transcodeSession.getTranscodedTime();
+    }
+
+    // For direct play, the whole file is available
+    return session.probe.format.duration;
   }
 
   /**
@@ -445,6 +643,19 @@ export class StreamingService {
   getSession(sessionId: string): PlaybackSessionInfo | undefined {
     return this.sessions.get(sessionId);
   }
+  
+  /**
+   * Refresh session access timestamp (called by heartbeat).
+   * Prevents the session from being cleaned up due to inactivity.
+   */
+  refreshSessionAccess(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastAccessAt = new Date().toISOString();
+      return true;
+    }
+    return false;
+  }
 
   /**
    * Get all active sessions.
@@ -483,12 +694,23 @@ export class StreamingService {
   }
 
   /**
-   * Shutdown all sessions.
+   * Shutdown all sessions and cleanup timers.
    */
   async shutdown(): Promise<void> {
     logger.info('Shutting down streaming service');
+    
+    // Stop cleanup timer first
+    this.stopCleanupTimer();
+    
+    // End all sessions (this will try to gracefully stop FFmpeg)
     await this.transcodeManager.endAllSessions('shutdown');
     this.sessions.clear();
+    
+    // Final safety check: kill any remaining FFmpeg processes for our transcode dir
+    // This handles edge cases where processes might have been orphaned
+    await killOrphanedFFmpegProcesses(this.sessionConfig.cacheDir);
+    
+    logger.info('Streaming service shutdown complete');
   }
 
   // ==========================================================================
@@ -525,10 +747,33 @@ export class StreamingService {
   }
 
   private generateDirectPlayPlaylist(session: PlaybackSessionInfo): string {
-    // For direct play, we generate a simple single-file playlist
-    // The client will use range requests for actual playback
+    // For direct play, we generate a byte-range HLS playlist
+    // This allows HLS.js to fetch ranges from the file directly
     const duration = session.probe.format.duration;
+    const fileSize = session.probe.fileSize ?? 0;
+    const bitrate = session.probe.format.bitrate ?? 0;
     const segmentDuration = this.sessionConfig.segmentDuration;
+
+    // If we don't have file size info, fall back to time-based estimation
+    if (fileSize === 0 || bitrate === 0) {
+      // Generate a simple playlist that points to the file URL
+      // HLS.js will use this as a single segment
+      const lines: string[] = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:6',
+        `#EXT-X-TARGETDURATION:${Math.ceil(duration)}`,
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
+        '',
+        `#EXTINF:${duration.toFixed(6)},`,
+        `/api/stream/${session.sessionId}/file`,
+        '#EXT-X-ENDLIST',
+      ];
+      return lines.join('\n') + '\n';
+    }
+
+    // Calculate byte ranges for segments based on bitrate
+    const bytesPerSecond = bitrate / 8;
     const segmentCount = Math.ceil(duration / segmentDuration);
 
     const lines: string[] = [
@@ -538,17 +783,23 @@ export class StreamingService {
       '#EXT-X-MEDIA-SEQUENCE:0',
       '#EXT-X-PLAYLIST-TYPE:VOD',
       '',
-      // Direct file URL for range-based playback
-      `#EXT-X-MAP:URI="/api/stream/${session.sessionId}/file"`,
-      '',
     ];
 
-    // Generate segment entries
+    // Generate byte-range segment entries
     let remaining = duration;
+    let byteOffset = 0;
     for (let i = 0; i < segmentCount; i++) {
       const segDuration = Math.min(segmentDuration, remaining);
+      const segBytes = Math.min(
+        Math.ceil(segDuration * bytesPerSecond),
+        fileSize - byteOffset
+      );
+
       lines.push(`#EXTINF:${segDuration.toFixed(6)},`);
-      lines.push(`/api/stream/${session.sessionId}/segment/${i}.ts`);
+      lines.push(`#EXT-X-BYTERANGE:${segBytes}@${byteOffset}`);
+      lines.push(`/api/stream/${session.sessionId}/file`);
+
+      byteOffset += segBytes;
       remaining -= segDuration;
     }
 
@@ -566,16 +817,21 @@ let streamingServiceInstance: StreamingService | null = null;
 
 /**
  * Initialize the streaming service singleton.
+ * Performs cleanup of orphaned processes and stale directories on startup.
  */
-export function initStreamingService(
+export async function initStreamingService(
   db: Database,
   serverCaps: ServerCapabilities,
-  config?: Partial<SessionConfig>
-): StreamingService {
+  config?: StreamingServiceConfig
+): Promise<StreamingService> {
   if (streamingServiceInstance) {
     logger.warn('Streaming service already initialized, returning existing instance');
     return streamingServiceInstance;
   }
+
+  // Clean up orphaned FFmpeg processes and stale directories from previous runs
+  const transcodeDir = config?.cacheDir ?? '/tmp/mediaserver/transcode';
+  await performStartupCleanup(transcodeDir);
 
   streamingServiceInstance = new StreamingService(db, serverCaps, config);
   return streamingServiceInstance;

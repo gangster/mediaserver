@@ -61,7 +61,7 @@ The project replicates features from the `forreel` project at `/Users/josh/play/
 
 ### Transcoding & Playback Pipeline
 
-> **Full spec:** [`docs/TRANSCODING_PIPELINE.md`](docs/TRANSCODING_PIPELINE.md) (v4.0)
+> **Full spec:** [`docs/TRANSCODING_PIPELINE.md`](docs/TRANSCODING_PIPELINE.md) (v5.0)
 
 The transcoding pipeline enables playback on any device from any server hardware.
 
@@ -119,6 +119,32 @@ ffmpeg -i input.mkv \
 
 Resume time is **always stored in source-file time**, regardless of playback speed or transcoding.
 
+#### Seeking Past Transcoded Content
+
+When seeking to a position that hasn't been transcoded yet:
+
+1. **Client detects seek beyond transcoded range** (position > transcodedTime + 30s)
+2. **Client calls server `playback.seek` endpoint** with target position
+3. **Server restarts FFmpeg** at the new position, creating a new epoch
+4. **Server waits for first segment** before returning (ensures immediate playback)
+5. **Client reloads HLS source** via `playerRef.current.reloadSource()`
+6. **Client updates `epochOffset`** to the new start position
+
+```typescript
+// In VideoPlayer, handleSeek:
+if (targetTime > transcodedTime + safeBuffer) {
+  // Server-side seek needed
+  const result = await serverSeek(targetTime);
+  epochOffsetRef.current = result.startPosition;  // Update epoch offset
+  playerRef.current.reloadSource(0); // Start at epoch beginning (video time 0)
+}
+```
+
+**transcodedTime tracking**:
+- Initialized to `startPosition` when session is created
+- Updated on each heartbeat response from server
+- Used to decide local seek (within transcoded) vs server-side seek (beyond transcoded)
+
 #### Cache Key Components
 
 Cache keys derived from PlaybackPlan include:
@@ -131,9 +157,186 @@ Cache keys derived from PlaybackPlan include:
 
 #### Related Files
 
-- Types: `packages/core/src/types/playback.ts`
+- Types: `packages/core/src/types/playback.ts`, `packages/core/src/types/transcoding.ts`
 - Router: `apps/server/src/routers/playback.ts`
 - Schema: `packages/db/src/schema/playback.ts`
+- Transcode Session: `apps/server/src/services/transcode-session.ts` (FFmpeg lifecycle, seek mutex)
+- Streaming Service: `apps/server/src/services/streaming-service.ts` (session management)
+
+### HLS Streaming & Video Player
+
+The web player uses **hls.js** for HLS streaming. Understanding this system is critical for debugging playback issues.
+
+#### Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ Client (WebVideoPlayer.tsx)                                         │
+│ ┌─────────────┐    ┌─────────────┐    ┌─────────────┐              │
+│ │ VideoPlayer │───▶│ hls.js      │───▶│ <video>     │              │
+│ │ (container) │    │ (HLS lib)   │    │ element     │              │
+│ └─────────────┘    └──────┬──────┘    └─────────────┘              │
+└────────────────────────────┼────────────────────────────────────────┘
+                             │ HTTP + Auth Header
+                             ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ Server (stream.ts routes)                                           │
+│ ┌─────────────┐    ┌─────────────┐    ┌─────────────┐              │
+│ │ /session    │    │ /master.m3u8│    │ /playlist   │              │
+│ │ (create)    │    │ (variants)  │    │ .m3u8       │              │
+│ └─────────────┘    └─────────────┘    └──────┬──────┘              │
+│                                              │                      │
+│ ┌─────────────────────────────────────────────┴─────────────────┐  │
+│ │ /tmp/mediaserver/transcode/{sessionId}/                       │  │
+│ │   ├── master.m3u8      (written at session creation)          │  │
+│ │   ├── playlist.m3u8    (written by FFmpeg, served directly)   │  │
+│ │   └── segment_*.ts     (written by FFmpeg, served directly)   │  │
+│ └───────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ FFmpeg Process                                                       │
+│ - Reads source file                                                  │
+│ - Writes segments + playlist.m3u8 to disk                           │
+│ - Uses EVENT playlist type for live transcoding                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `apps/web/src/components/player/WebVideoPlayer.tsx` | hls.js integration, video element |
+| `apps/web/src/components/player/VideoPlayer.tsx` | Player container, session management, epoch offset |
+| `apps/web/src/lib/hls-config.ts` | hls.js configuration |
+| `apps/server/src/routes/stream.ts` | HLS routes (playlists, segments) |
+| `apps/server/src/services/streaming-service.ts` | Session management, FFmpeg orchestration |
+| `apps/server/src/services/transcode-session.ts` | FFmpeg process lifecycle, seek mutex, epoch management |
+| `apps/server/src/services/ffmpeg-builder.ts` | FFmpeg command generation |
+| `packages/api-client/src/hooks/usePlaybackSession.ts` | Client-side session hook, transcodedTime tracking |
+
+#### HLS.js Configuration Gotchas
+
+**⚠️ CRITICAL: Config Validation Rules**
+
+hls.js throws errors for invalid configs. Key constraints:
+
+```typescript
+// ❌ WRONG - Will throw "liveMaxLatencyDuration must be greater than liveSyncDuration"
+{
+  liveSyncDuration: 9999,
+  liveMaxLatencyDuration: 9999,  // Must be GREATER than liveSyncDuration
+}
+
+// ✅ CORRECT
+{
+  liveSyncDuration: 9999,
+  liveMaxLatencyDuration: 99999,  // > liveSyncDuration
+}
+```
+
+**Why we use these settings:** We use FFmpeg's `EVENT` playlist type for "watch while transcoding" - this looks like a live stream to hls.js. Setting high `liveSyncDuration` prevents hls.js from jumping to the "live edge" (end of available content).
+
+#### Session Flow
+
+1. **Client creates session** via `playback.createSession` tRPC mutation
+2. **Server probes media**, creates PlaybackPlan, starts FFmpeg
+3. **Server writes `master.m3u8`** to disk immediately
+4. **FFmpeg writes segments** (`segment_00000.ts`, etc.) and `playlist.m3u8` 
+5. **Client loads `master.m3u8`** → points to `playlist.m3u8`
+6. **hls.js fetches segments** as needed for playback
+
+#### Auth Token Injection
+
+HLS requests need auth tokens. We inject them via `xhrSetup`:
+
+```typescript
+// apps/web/src/lib/hls-config.ts
+export async function createHlsConfig(dataSaver = false) {
+  const token = await getAccessToken();  // Wait for Zustand hydration!
+  return {
+    ...baseConfig,
+    xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+    },
+  };
+}
+```
+
+**⚠️ The config creation is async** because `getAccessToken()` must wait for Zustand store hydration.
+
+#### Debugging Playback Issues
+
+**Console Filtering:** Browser DevTools may filter out `console.warn` messages by default. Enable "All levels" in the console filter dropdown when debugging.
+
+**Metro Bundler Caching:** If code changes aren't taking effect:
+```bash
+# Full cache clear
+pkill -f "expo start"
+rm -rf apps/web/.expo apps/web/node_modules/.cache
+nix develop -c bash -c "cd apps/web && npx expo start --web --port 8081 --clear"
+```
+
+**Check HLS Init Flow:** Look for these logs in order:
+1. `[HLS Init] Using hls.js for HLS stream`
+2. `[HLS Config] Creating config`
+3. `[HLS Init] Config created, mounted: true`
+4. `[HLS Init] Creating HLS instance...`
+5. `[HLS Init] HLS created:`
+6. `[HLS Init] Attaching to video element...`
+7. `[HLS Init] Loading source:`
+
+If flow stops after "Config created", check for config validation errors.
+
+**Common HLS Errors:**
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| `liveMaxLatencyDuration must be greater than liveSyncDuration` | Config validation | Make `liveMaxLatencyDuration > liveSyncDuration` |
+| `404 on master.m3u8` | Session not created or expired | Check server logs, refresh page |
+| `401 on segment requests` | Auth token not attached | Check `xhrSetup` in hls-config.ts |
+| No network requests from hls.js | HLS instance creation failed | Check for sync errors in console |
+
+#### FFmpeg HLS Settings
+
+Key FFmpeg flags for HLS generation:
+
+```bash
+ffmpeg -i input.mkv \
+  -f hls \                           # HLS output format
+  -hls_time 4 \                      # 4-second segments
+  -hls_list_size 0 \                 # Keep all segments in playlist
+  -hls_playlist_type event \         # EVENT for live transcoding
+  -hls_segment_filename segment_%05d.ts \
+  -start_number 0 \
+  -hls_flags independent_segments \  # Each segment self-contained
+  playlist.m3u8
+```
+
+**Why EVENT not VOD?** 
+- `VOD` waits for all segments before writing playlist (no live viewing)
+- `EVENT` writes playlist progressively (watch while transcoding works)
+- We append `#EXT-X-ENDLIST` when transcoding completes
+
+#### Duration Handling
+
+For EVENT playlists, hls.js may report `Infinity` as duration. We handle this by:
+1. Server returns actual duration in session creation response
+2. Client stores duration from session
+3. `handleDurationChange` ignores `Infinity` values from hls.js
+
+```typescript
+// WebVideoPlayer.tsx
+const handleDurationChange = () => {
+  if (Number.isFinite(video.duration) && video.duration > 0) {
+    emitStateChange({ duration: video.duration });
+  }
+  // Ignore Infinity - use duration from session instead
+};
+```
 
 ### UI Components (Gluestack-UI v3)
 
@@ -709,3 +912,113 @@ If the server fails with `EADDRINUSE`:
 ```bash
 lsof -ti:3000 | xargs kill -9
 ```
+
+### Video Player Stuck on Spinner
+1. **Check browser console for HLS errors** - Look for config validation errors or 401/404 on requests
+2. **Verify session was created** - Should see `playback.createSession` succeed in Network tab
+3. **Check FFmpeg is running** - Server logs should show "Starting FFmpeg" and segment generation
+4. **Clear Metro cache** - Code changes may not be taking effect (see above)
+5. **Check transcode directory** - Files should appear in `/tmp/mediaserver/transcode/{sessionId}/`
+
+### Resume Stuck on Spinner (Specific Case)
+If resuming playback shows correct time but video doesn't start:
+- **Root cause**: `startTime` prop was passing resume position to video element
+- **Fix**: For transcoded content, `startTime` must be `0` (FFmpeg already seeks via `-ss`)
+- The `epochOffset` handles translating video element time to display time
+- Check VideoPlayer passes: `startTime={session?.directPlay ? startPosition : 0}`
+
+### HLS.js `bufferSeekOverHole` Warning
+```json
+{ "type": "mediaError", "details": "bufferSeekOverHole", "fatal": false }
+```
+**This is normal and non-fatal.** HLS.js detected a small gap (0-0.1s) at stream start and automatically seeked over it. Caused by FFmpeg seeking to nearest keyframe.
+
+### HLS Playback Erratic/Jumping
+This usually means hls.js is treating EVENT playlist as live stream:
+- Verify `liveSyncDuration` and `liveMaxLatencyDuration` are set high in hls-config.ts
+- Ensure `liveMaxLatencyDuration > liveSyncDuration` (validation will fail otherwise)
+- Check `backBufferLength: Infinity` is set to prevent buffer pruning
+
+### playback.heartbeat Returns 400
+The heartbeat validation expects:
+- `sessionId`: nanoid format (use `idSchema` not `uuidSchema`)
+- `position`: number (floats allowed)
+- `isPlaying`: boolean
+- `buffering`: boolean (optional, defaults false)
+
+Check that the session actually exists in the database - it's inserted during `createSession`.
+
+### Multiple FFmpeg Processes Running (FFmpeg Leak)
+**Symptom**: `ps aux | grep ffmpeg` shows many processes for same session.
+
+**Causes**:
+1. Rapid seeks spawning FFmpeg before previous killed
+2. FFmpeg exit handler triggering unwanted restart during seek
+
+**Diagnosis**:
+```bash
+ps aux | grep ffmpeg | grep -v grep | wc -l  # Should be 1-2
+```
+
+**Cleanup**:
+```bash
+pkill -9 -f "ffmpeg.*transcode"
+rm -rf /tmp/mediaserver/transcode/*
+nix develop -c yarn restart
+```
+
+**Prevention** (implemented in transcode-session.ts):
+- Seek mutex (`seekInProgress` promise) serializes seek operations
+- `handleFFmpegExit` checks `ffmpegState.status === 'stopping'` before restart
+- Session sets `status = 'ending'` BEFORE stopping FFmpeg
+
+### Seek Works Sometimes, Fails Sometimes
+**Cause**: Client wasn't tracking `transcodedTime` properly.
+
+**Fix**: 
+- Heartbeat returns `transcodedTime` from server
+- Client initializes `transcodedTime` to `startPosition` on session creation
+- Seek logic checks `targetTime > transcodedTime + 30s` to decide local vs server seek
+
+### No Audio/Video Codec Support Errors
+The PlaybackPlan should fall back through the 7-tier hierarchy. If you see codec errors:
+1. Check `FFmpegCapabilityManifest` was generated at server start
+2. Verify client capabilities are being sent in session creation
+3. Check server logs for the playback plan decision
+
+### Session Cleanup and Idle Timeouts
+Sessions are automatically cleaned up after 60 seconds of inactivity (no heartbeat). The cleanup timer runs every 15 seconds. If sessions are not being cleaned up:
+1. Check server logs for "Cleaning up idle session" messages
+2. Verify heartbeat endpoint is being called by client
+3. Check `lastAccessAt` timestamp in session info
+
+### Video Duration Shows as Infinity
+This is expected for EVENT playlists during live transcoding. The player should:
+1. Use the `duration` value from the session creation response (from ffprobe)
+2. Store this in `knownDurationRef` and use it as the authoritative duration
+3. Ignore hls.js duration updates that report `Infinity`
+
+### Premature "Ended" Event
+If the video shows "Finished" prematurely during transcoding:
+1. Check `handleEnded` in WebVideoPlayer.tsx - it should verify `currentTime >= knownDuration - 10`
+2. If not near the end, it should set status to `buffering`, not `ended`
+3. This prevents false endings when hls.js runs out of buffered segments
+
+### Quality Selector Shows Wrong Resolution
+The quality selector uses tier-based height thresholds:
+- `>= 1800` → 4K (includes widescreen 4K like 3840x1600)
+- `>= 800` → 1080p (includes widescreen like 1920x800)
+- `>= 600` → 720p
+- etc.
+
+If labels are wrong, check `getQualityLabel()` in `hls-config.ts`.
+
+### Volume Slider Error: Cannot read 'getBoundingClientRect'
+This happens when the slider element becomes null during drag. The fix is to capture `e.currentTarget` into a local variable at the start of `handleDragStart`, before any async operations or event listener callbacks.
+
+### First Segment Timeout
+If transcoding is slow (especially 4K on modest hardware), increase timeouts:
+- `firstSegmentTimeoutMs`: 45000 (45 seconds)
+- `noProgressTimeoutMs`: 60000 (60 seconds)
+
+These are configured in `streaming-service.ts`.

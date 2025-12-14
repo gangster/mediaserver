@@ -583,8 +583,12 @@ function buildVideoPlan(
     }
   }
 
-  // Determine resolution
-  let resolution: { width: number; height: number } | undefined;
+  // Determine resolution - always include it so HLS variants report correct quality
+  let resolution: { width: number; height: number } = {
+    width: video.width,
+    height: video.height,
+  };
+  
   const maxRes = getMaxResolutionDimensions(
     ctx.preferences.maxResolution ?? ctx.client.maxResolution
   );

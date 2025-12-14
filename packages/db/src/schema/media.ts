@@ -49,6 +49,9 @@ export const movies = sqliteTable('movies', {
   })
     .notNull()
     .default('pending'),
+  // Skip segments for intro/credits (in seconds)
+  /** Start time of credits in seconds (null if not set) */
+  creditsStart: integer('credits_start'),
   addedAt: text('added_at')
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -158,6 +161,13 @@ export const episodes = sqliteTable('episodes', {
   directPlayable: integer('direct_playable', { mode: 'boolean' }).default(false),
   needsTranscode: integer('needs_transcode', { mode: 'boolean' }).default(false),
   subtitlePaths: text('subtitle_paths'), // JSON array
+  // Skip segments for intro/credits (in seconds)
+  /** Start time of intro sequence in seconds (null if not set) */
+  introStart: integer('intro_start'),
+  /** End time of intro sequence in seconds (null if not set) */
+  introEnd: integer('intro_end'),
+  /** Start time of credits in seconds (null if not set) */
+  creditsStart: integer('credits_start'),
   addedAt: text('added_at')
     .notNull()
     .default(sql`(datetime('now'))`),

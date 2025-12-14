@@ -7,3 +7,9 @@ export { useAutoSave, useAutoSaveValue } from './useAutoSave';
 export { useDebounce } from './useDebounce';
 export { useGlobalSearch } from './useGlobalSearch';
 export { useModalKeyboard } from './useModalKeyboard';
+export { usePlayerKeyboard, KEYBOARD_SHORTCUTS } from './usePlayerKeyboard';
+export type {
+  UsePlayerKeyboardOptions,
+  UsePlayerKeyboardReturn,
+  KeyboardAction,
+} from './usePlayerKeyboard';

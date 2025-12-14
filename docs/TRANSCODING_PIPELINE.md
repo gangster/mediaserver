@@ -1,100 +1,62 @@
-# Transcoding Pipeline Architecture v3.0
+# Transcoding Pipeline Architecture v5.0
 
 > **Mission**: Enable premium playback on any device, from any server hardware, for local and remote users alike.
 
 ## Table of Contents
 
 1. [Core Design Principles](#1-core-design-principles)
-2. [Server Capability Detection](#2-server-capability-detection)
-3. [Client Capability Detection](#3-client-capability-detection)
-4. [Quality Profile System](#4-quality-profile-system)
-5. [Transport Layer](#5-transport-layer)
-6. [Media Analysis & Metadata](#6-media-analysis--metadata)
-7. [Transcoding Engine Architecture](#7-transcoding-engine-architecture)
-8. [HLS Correctness Contracts](#8-hls-correctness-contracts)
-9. [Live Transcoding & Seek Behavior](#9-live-transcoding--seek-behavior)
-10. [Audio Track & Subtitle Switching](#10-audio-track--subtitle-switching)
-11. [HDR Handling](#11-hdr-handling)
-12. [Content Quirks Handling](#12-content-quirks-handling)
-13. [Trickplay & Seek Preview](#13-trickplay--seek-preview)
-14. [User Experience Features](#14-user-experience-features)
-15. [Error Recovery & Resilience](#15-error-recovery--resilience)
-16. [Caching Strategy](#16-caching-strategy)
-17. [Security Considerations](#17-security-considerations)
-18. [Bandwidth Measurement & Adaptation](#18-bandwidth-measurement--adaptation)
-19. [Offline Downloads Support](#19-offline-downloads-support)
-20. [Multi-Version Media Handling](#20-multi-version-media-handling)
-21. [Monitoring & Observability](#21-monitoring--observability)
-22. [Operational Concerns](#22-operational-concerns)
-23. [API Versioning & Client Contract](#23-api-versioning--client-contract)
-24. [Testing Strategy](#24-testing-strategy)
-25. [Database Schema](#25-database-schema)
-26. [FFmpeg Command Reference](#26-ffmpeg-command-reference)
-27. [Implementation Phases](#27-implementation-phases)
-28. [Future Scope](#28-future-scope)
+2. [Architecture Overview](#2-architecture-overview)
+3. [Server Capability Detection](#3-server-capability-detection)
+4. [FFmpeg Capability Manifest](#4-ffmpeg-capability-manifest)
+5. [Client Capability Detection](#5-client-capability-detection)
+6. [Quality Profile System](#6-quality-profile-system)
+7. [PlaybackPlan: Single Source of Truth](#7-playbackplan-single-source-of-truth)
+8. [Transport Layer](#8-transport-layer)
+9. [Media Analysis & Metadata](#9-media-analysis--metadata)
+10. [Transcoding Engine Architecture](#10-transcoding-engine-architecture)
+11. [HLS Implementation](#11-hls-implementation)
+12. [Session Management](#12-session-management)
+13. [Audio Track & Subtitle Switching](#13-audio-track--subtitle-switching)
+14. [HDR Handling](#14-hdr-handling)
+15. [Content Quirks Handling](#15-content-quirks-handling)
+16. [Trickplay & Seek Preview](#16-trickplay--seek-preview)
+17. [User Experience Features](#17-user-experience-features)
+18. [Error Recovery & Resilience](#18-error-recovery--resilience)
+19. [Caching Strategy](#19-caching-strategy)
+20. [Security Considerations](#20-security-considerations)
+21. [API Reference](#21-api-reference)
+22. [Database Schema](#22-database-schema)
+23. [FFmpeg Command Reference](#23-ffmpeg-command-reference)
+24. [Troubleshooting](#24-troubleshooting)
+25. [Future Scope](#25-future-scope)
 
 ---
 
 ## 1. Core Design Principles
 
-### 1.1 Playback Hierarchy
+### 1.1 Playback Hierarchy (7 Tiers)
 
 The system attempts playback modes in strict order, failing down to the next tier:
 
 | Priority | Mode | Video | Audio | Container | When |
 |----------|------|-------|-------|-----------|------|
 | 1 | **Direct Play** | Source | Source | Source | Client supports everything |
-| 2 | **Remux** | `-c:v copy` | `-c:a copy` | MP4/MKV | Container incompatible, codecs OK |
-| 3 | **Remux-to-HLS** | `-c:v copy` | `-c:a copy` | HLS (TS/fMP4) | Range unreliable or remote, keyframes OK |
-| 4 | **Transcode-to-HLS** | Encode | Encode/copy | HLS | Codec unsupported or keyframes too sparse |
+| 2 | **Direct Play + Audio Transcode** | Source | Encode | Source | Video OK, audio codec unsupported |
+| 3 | **Remux** | `-c:v copy` | `-c:a copy` | MP4/MKV | Container incompatible, codecs OK |
+| 4 | **Remux + Audio Transcode** | `-c:v copy` | Encode | MP4/MKV | Container fix + audio transcode |
+| 5 | **Remux-to-HLS** | `-c:v copy` | `-c:a copy` | HLS (TS) | Range unreliable or remote, keyframes OK |
+| 6 | **Remux-to-HLS + Audio Transcode** | `-c:v copy` | Encode | HLS | Video copy OK, audio needs transcode |
+| 7 | **Transcode-to-HLS** | Encode | Encode/copy | HLS | Codec unsupported or keyframes too sparse |
 
-**Rule: Never show "format not supported" error**
+**Rule: Never show "format not supported" error.** Always fall back gracefully.
 
-#### 1.1.1 Remux Correctness Constraints
-
-When remuxing to MP4 for direct streaming:
-
-```bash
-# Required flags for MP4 remux
-ffmpeg -i input.mkv \
-  -c:v copy -c:a copy \
-  -movflags +faststart \       # moov atom at start for streaming
-  -map 0:v:0 -map 0:a:0 \      # explicit track selection
-  -sn \                        # drop subtitles (can't stream embedded PGS)
-  output.mp4
-```
-
-**Defaults:**
-- Always apply `+faststart` for streaming MP4s
-- Drop image-based subtitles (PGS/VOBSUB) from MP4 remux
-- Preserve text subtitles only if client explicitly supports them in container
-
-#### 1.1.2 Remux-to-HLS Gating (Keyframe Check)
-
-Before allowing remux-to-HLS (`-c:v copy` into HLS), validate keyframe intervals:
-
-```typescript
-interface KeyframeAnalysis {
-  maxInterval: number;    // seconds
-  avgInterval: number;    // seconds  
-  isRegular: boolean;     // variance < 20%
-}
-
-const REMUX_HLS_THRESHOLDS = {
-  maxKeyframeInterval: 8,  // seconds - reject if any gap > 8s
-  avgKeyframeInterval: 4,  // seconds - warn if avg > 4s
-};
-
-function canRemuxToHLS(analysis: KeyframeAnalysis): boolean {
-  return analysis.maxInterval <= REMUX_HLS_THRESHOLDS.maxKeyframeInterval;
-}
-```
-
-**Action on failure:** Fall through to Transcode-to-HLS.
+**Audio-only transcode is first-class.** Copying video while transcoding audio is a huge UX win (fast startup, low CPU).
 
 ### 1.2 Instant Playback
 
 Users must start watching within **3-5 seconds** of pressing play.
+
+**Segment duration**: 4 seconds by default (configurable).
 
 ### 1.3 Graceful Degradation
 
@@ -116,19 +78,85 @@ Always provide a playable option:
 
 ---
 
-## 2. Server Capability Detection
+## 2. Architecture Overview
 
-### 2.1 Detection Flow
+### 2.1 Simplified Streaming Architecture
+
+The current implementation uses a **simplified disk-based architecture**:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                           Client (Web Player)                         │
+│  ┌────────────┐    ┌────────────┐    ┌────────────┐                  │
+│  │ VideoPlayer │───▶│  hls.js    │───▶│  <video>   │                  │
+│  │ (container) │    │  library   │    │  element   │                  │
+│  └────────────┘    └─────┬──────┘    └────────────┘                  │
+└────────────────────────────┼──────────────────────────────────────────┘
+                             │ HTTP + Auth Header
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         Server (Hono Routes)                          │
+│  ┌─────────────┐   ┌─────────────┐   ┌─────────────┐                 │
+│  │ POST        │   │ GET         │   │ GET         │                 │
+│  │ /session    │   │ /master.m3u8│   │ /playlist   │                 │
+│  │ (create)    │   │ (from disk) │   │ .m3u8       │                 │
+│  └─────────────┘   └─────────────┘   └──────┬──────┘                 │
+│                                              │                        │
+│  ┌────────────────────────────────────────────┴───────────────────┐  │
+│  │         /tmp/mediaserver/transcode/{sessionId}/                 │  │
+│  │           ├── master.m3u8      (written at session creation)    │  │
+│  │           ├── playlist.m3u8   (written by FFmpeg progressively) │  │
+│  │           └── segment_00000.ts, segment_00001.ts, ...           │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         FFmpeg Process                                │
+│  - Spawned on session creation                                        │
+│  - Reads source media file                                            │
+│  - Writes segments + playlist.m3u8 to disk                           │
+│  - Uses EVENT playlist type for progressive writing                  │
+│  - Managed by TranscodeSessionManager                                 │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 2.2 Key Design Decisions
+
+1. **Disk-based streaming**: FFmpeg writes directly to disk, routes serve files directly
+2. **EVENT playlist type**: Allows "watch while transcoding" (progressive HLS)
+3. **No in-memory playlist state**: Server reads FFmpeg's actual output
+4. **Automatic ENDLIST**: Appended when transcoding appears complete (file unchanged for 2+ seconds)
+5. **Stateless routes**: Session state stored in files, not memory (survives restart)
+
+### 2.3 Key Files
+
+| File | Purpose |
+|------|---------|
+| `apps/server/src/routes/stream.ts` | HLS routes (playlists, segments, session management) |
+| `apps/server/src/services/streaming-service.ts` | Session orchestration, FFmpeg lifecycle |
+| `apps/server/src/services/transcode-session.ts` | Individual FFmpeg process management |
+| `apps/server/src/services/ffmpeg-builder.ts` | FFmpeg command generation |
+| `apps/server/src/services/playback-planner.ts` | PlaybackPlan generation |
+| `apps/server/src/services/media-probe.ts` | Media file analysis (ffprobe) |
+| `apps/web/src/components/player/WebVideoPlayer.tsx` | hls.js integration |
+| `apps/web/src/lib/hls-config.ts` | hls.js configuration |
+
+---
+
+## 3. Server Capability Detection
+
+### 3.1 Detection Flow
 
 At server startup:
 1. **Detect CPU** → Cores, threads, model, architecture
 2. **Detect GPU** → Vendor, model, VRAM, driver
-3. **Probe FFmpeg Encoders** → Test each for availability
+3. **Generate FFmpeg Capability Manifest** → Test encoders, decoders, filters
 4. **Assess Resources** → RAM, disk space
 5. **Classify Server** → low | medium | high | enterprise
 6. **Store Results** → Save to database
 
-### 2.2 TypeScript Interfaces
+### 3.2 TypeScript Interfaces
 
 ```typescript
 interface CPUInfo {
@@ -145,66 +173,78 @@ interface GPUInfo {
   model: string;
   vram: number;  // MB
   driverVersion: string;
-  encoders: { h264: boolean; hevc: boolean; av1: boolean };
-  decoders: { h264: boolean; hevc: boolean; av1: boolean; vp9: boolean };
 }
 
 interface ServerCapabilities {
   cpu: CPUInfo;
   gpu: GPUInfo;
-  availableEncoders: EncoderCapability[];
-  availableDecoders: DecoderCapability[];
+  ffmpegManifest: FFmpegCapabilityManifest;
   serverClass: 'low' | 'medium' | 'high' | 'enterprise';
   maxConcurrentTranscodes: number;
   maxConcurrentThumbnailJobs: number;
   ramMB: number;
   scratchDiskSpaceGB: number;
-}
-```
-
-### 2.3 Encoder Detection Commands
-
-```bash
-# NVIDIA
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
-
-# Intel VA-API (Linux)
-vainfo
-
-# macOS VideoToolbox
-ffmpeg -encoders 2>/dev/null | grep videotoolbox
-
-# Test encoder availability
-ffmpeg -y -f lavfi -i color=c=black:s=320x240:d=1 -c:v h264_nvenc -frames:v 30 -f null -
-
-# Test decoder availability (NVDEC)
-ffmpeg -y -hwaccel cuda -hwaccel_output_format cuda -f lavfi -i color=c=black:s=320x240:d=1 -frames:v 30 -f null -
-```
-
-### 2.4 Server Classification Algorithm
-
-```typescript
-function classifyServer(cpu: CPUInfo, gpu: GPUInfo, encoders: Encoder[]): ServerClass {
-  const hasHardwareEncoder = encoders.some(e => e.type === 'hardware' && e.tested);
-  
-  if (gpu.vendor !== 'none' && cpu.threads >= 16 && hasHardwareEncoder) {
-    return { class: 'enterprise', maxTranscodes: 10, maxThumbnailJobs: 4 };
-  }
-  if (hasHardwareEncoder) {
-    return { class: 'high', maxTranscodes: Math.min(8, Math.floor(gpu.vram / 1500)), maxThumbnailJobs: 2 };
-  }
-  if (cpu.threads >= 4) {
-    return { class: 'medium', maxTranscodes: 2, maxThumbnailJobs: 1 };
-  }
-  return { class: 'low', maxTranscodes: cpu.threads >= 2 ? 1 : 0, maxThumbnailJobs: 0 };
+  hwaccel: {
+    cuda: boolean;
+    nvdec: boolean;
+    qsv: boolean;
+    vaapi: boolean;
+    videoToolbox: boolean;
+    d3d11va: boolean;
+  };
 }
 ```
 
 ---
 
-## 3. Client Capability Detection
+## 4. FFmpeg Capability Manifest
 
-### 3.1 Confidence-Based Detection
+At startup, generate and persist a **strict capability manifest** that gates every decision branch.
+
+```typescript
+interface FFmpegCapabilityManifest {
+  ffmpegVersion: string;
+  ffprobeVersion: string;
+  
+  hwaccel: {
+    cuda: boolean;
+    nvdec: boolean;
+    qsv: boolean;
+    vaapi: boolean;
+    videotoolbox: boolean;
+    d3d11va: boolean;
+  };
+  
+  encoders: {
+    libx264: boolean;
+    libx265: boolean;
+    libsvtav1: boolean;
+    h264_nvenc: boolean;
+    hevc_nvenc: boolean;
+    h264_videotoolbox: boolean;
+    hevc_videotoolbox: boolean;
+    // ... etc
+  };
+  
+  filters: {
+    tonemap: boolean;
+    tonemap_cuda: boolean;
+    yadif: boolean;
+    scale: boolean;
+    scale_cuda: boolean;
+    loudnorm: boolean;
+    // ... etc
+  };
+  
+  generatedAt: string;
+}
+```
+
+---
+
+## 5. Client Capability Detection
+
+### 5.1 Confidence-Based Detection
 
 | Confidence | Method | Strategy |
 |------------|--------|----------|
@@ -212,7 +252,7 @@ function classifyServer(cpu: CPUInfo, gpu: GPUInfo, encoders: Encoder[]): Server
 | **Medium** | User-Agent parsing | Try advanced, ready to fallback |
 | **Low** | Unknown device | Universal fallback (H.264+AAC) |
 
-### 3.2 Client Capabilities Interface
+### 5.2 Client Capabilities Interface
 
 ```typescript
 interface ClientCapabilities {
@@ -222,45 +262,31 @@ interface ClientCapabilities {
     vp9: { supported: boolean; profile?: number };
     av1: { supported: boolean };
   };
-  audioCodecs: { aac: boolean; ac3: boolean; eac3: boolean; dts: boolean; opus: boolean; flac: boolean };
+  audioCodecs: { 
+    aac: boolean; 
+    ac3: boolean; 
+    eac3: boolean; 
+    dts: boolean; 
+    opus: boolean; 
+    flac: boolean;
+  };
   maxAudioChannels: number;
   hdr: { 
     hdr10: boolean; 
     dolbyVision: boolean; 
-    dvProfile5: boolean;   // IPTPQc2 (requires DV decoder)
-    dvProfile7: boolean;   // MEL (can't fallback to HDR10)
-    dvProfile8: boolean;   // HLG-compatible (can fallback to HDR10)
     hlg: boolean; 
   };
   maxResolution: '4k' | '1080p' | '720p' | '480p';
   confidenceScore: number;
   rangeReliability: 'trusted' | 'suspect' | 'untrusted';
-  supportsPlaybackSpeed: boolean;
-  supportsTrickplay: 'bif' | 'webvtt' | 'none';
 }
 ```
 
-### 3.3 Known Platform Profiles
-
-| Platform | H.264 | HEVC | VP9 | AV1 | AC3 | HDR10 | DV | Range | Trickplay |
-|----------|-------|------|-----|-----|-----|-------|-----|-------|-----------|
-| iOS Safari | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | P8 | ✅ | WebVTT |
-| macOS Safari | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | P8 | ✅ | WebVTT |
-| Chrome Desktop | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | WebVTT |
-| Android Chrome | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | WebVTT |
-| Fire TV | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | P5/8 | ⚠️ | BIF |
-| Roku | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | BIF |
-| Apple TV | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | P5/8 | ✅ | WebVTT |
-| Smart TVs (generic) | ✅ | ⚠️ | ❌ | ❌ | ⚠️ | ❌ | ❌ | ❌ | BIF |
-| **Unknown** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | none |
-
-**Legend:** ✅ = reliable, ⚠️ = device-dependent, ❌ = assume unsupported, P5/P8 = DV Profile support
-
 ---
 
-## 4. Quality Profile System
+## 6. Quality Profile System
 
-### 4.1 Profile Definitions
+### 6.1 Profile Definitions
 
 | Profile | Resolution | H.264 Bitrate | HEVC Bitrate | Audio |
 |---------|------------|---------------|--------------|-------|
@@ -270,120 +296,142 @@ interface ClientCapabilities {
 | **Low** | 480p | 2 Mbps | 1.2 Mbps | 128k stereo |
 | **Minimum** | 360p | 800 kbps | 500 kbps | 96k stereo |
 
-### 4.2 Profile Selection
+### 6.2 Quality Label Assignment
+
+Quality labels are assigned based on video height using tier thresholds:
 
 ```typescript
-function selectProfile(input: ProfileInput): TranscodingProfile | 'direct' {
-  // 1. Can we direct play?
-  if (canDirectPlay(input.sourceMedia, input.clientCapabilities)) {
-    return 'direct';
-  }
-  
-  // 2. Filter by server capability
-  const serverCompatible = PROFILES.filter(p => isServerCompatible(p, input.serverCapabilities));
-  
-  // 3. Filter by client capability
-  const clientCompatible = serverCompatible.filter(p => isClientCompatible(p, input.clientCapabilities));
-  
-  // 4. Filter by bandwidth (with 20% headroom)
-  const bandwidthCompatible = clientCompatible.filter(p => getTotalBitrate(p) * 1.2 <= input.networkBandwidth);
-  
-  // 5. Select highest quality that doesn't upscale
-  return bandwidthCompatible
-    .filter(p => p.maxHeight <= input.sourceMedia.height)
-    .sort((a, b) => b.bitrate - a.bitrate)[0];
+export function getQualityLabel(height: number): string {
+  if (height >= 1800) return '4K';      // Covers 2160p and widescreen 4K (3840x1600)
+  if (height >= 800) return '1080p';    // Covers 1080p and widescreen (1920x800)
+  if (height >= 600) return '720p';
+  if (height >= 400) return '480p';
+  if (height >= 300) return '360p';
+  if (height >= 200) return '240p';
+  return `${height}p`;
 }
+```
+
+This tier-based approach correctly handles widescreen aspect ratios where the height is lower than standard 16:9 content.
+
+---
+
+## 7. PlaybackPlan: Single Source of Truth
+
+### 7.1 Overview
+
+The **PlaybackPlan** is the canonical output of all decision-making. It's computed once and drives everything: FFmpeg command building, URL generation, cache keys, and logging.
+
+### 7.2 PlaybackPlan Structure
+
+```typescript
+interface PlaybackPlan {
+  planId: string;
+  sessionId: string;
+  mediaId: string;
+  userId: string;
+  
+  // Transport & Mode
+  transport: 'range' | 'hls';
+  mode: PlaybackMode;
+  container: 'source' | 'mp4' | 'mkv' | 'hls_ts' | 'hls_fmp4';
+  
+  // Video Track
+  video: {
+    action: 'copy' | 'encode';
+    sourceIndex: number;
+    codec: 'source' | 'h264' | 'hevc' | 'av1' | 'vp9';
+    encoder?: string;
+    hwaccel: boolean;
+    profile?: string;
+    level?: string;
+    bitrate?: number;
+    crf?: number;
+    resolution?: { width: number; height: number };
+    filters: string[];
+  };
+  
+  // Audio Track
+  audio: {
+    action: 'copy' | 'encode';
+    sourceIndex: number;
+    codec: 'source' | 'aac' | 'ac3' | 'eac3' | 'opus';
+    channels: number;
+    bitrate?: number;
+    filters: string[];
+  };
+  
+  // Subtitles
+  subtitles: {
+    mode: 'none' | 'sidecar' | 'burn';
+    sourceIndex?: number;
+    format?: 'webvtt' | 'source';
+  };
+  
+  // HDR Handling
+  hdr: {
+    sourceFormat: 'sdr' | 'hdr10' | 'hdr10plus' | 'hlg' | 'dv_p5' | 'dv_p7' | 'dv_p8';
+    mode: 'passthrough' | 'convert_hdr10' | 'extract_hdr10_base' | 'tonemap_sdr';
+    tonemapFilter?: string;
+  };
+  
+  // Content Quirks
+  quirks: {
+    deinterlace?: { filter: string; reason: string };
+    vfrToCfr?: { targetFps: number; reason: string };
+  };
+  
+  // Decision Audit
+  reasonCodes: PlaybackReasonCode[];
+  decisionPath: string[];
+  
+  // Cache Key
+  cacheKey: string;
+  
+  createdAt: string;
+}
+
+type PlaybackMode =
+  | 'direct'
+  | 'direct_audio_transcode'
+  | 'remux'
+  | 'remux_audio_transcode'
+  | 'remux_hls'
+  | 'remux_hls_audio_transcode'
+  | 'transcode_hls';
 ```
 
 ---
 
-## 5. Transport Layer
+## 8. Transport Layer
 
-### 5.1 Range vs HLS Decision Policy
+### 8.1 Range vs HLS Decision
 
 | Condition | Transport | Rationale |
 |-----------|-----------|-----------|
-| LAN + trusted client + direct play | Range (byte-range) | Lowest latency, simplest |
-| LAN + remux needed | Range | Still fast enough |
-| Remote + direct play + trusted client | Range | Simpler, works for good networks |
-| Remote + any transcode | HLS | Seek flexibility, ABR support |
-| Range-suspect client | HLS | Avoid playback failures |
-| Any + ABR required | HLS | Only HLS supports multi-bitrate |
+| Direct play + LAN | Range | Lowest latency |
+| Any transcode | HLS | Seek flexibility, progressive delivery |
+| Remote access | HLS | Better for variable connections |
+| Unknown client | HLS | Most compatible |
 
-**Defaults:**
-- LAN detection: private IP ranges (10.x, 172.16-31.x, 192.168.x) or same /24 subnet
-- Remote default: HLS unless explicitly overridden by user preference
-- Unknown client: HLS (safest)
+### 8.2 Current Implementation
 
-### 5.2 HTTP Range Contract (RFC 7233)
-
-When serving via byte-range (direct play, remux):
-
-```typescript
-interface RangeResponse {
-  status: 206;
-  headers: {
-    'Content-Range': `bytes ${start}-${end}/${total}`;
-    'Content-Length': string;
-    'Accept-Ranges': 'bytes';
-    'ETag': string;
-    'Last-Modified': string;
-    'Cache-Control': string;
-  };
-}
-```
-
-**Required behaviors:**
-- Support `Range: bytes=0-` (open-ended)
-- Support `Range: bytes=X-Y` (bounded)
-- Support `If-Range` with ETag for resume validation
-- Return `416` if range start > file size
-- Return `200` with full file if `Range` header malformed (graceful fallback)
-
-### 5.3 Range Unreliability Detection
-
-```typescript
-interface RangeHealthTracker {
-  sessionId: string;
-  clientId: string;
-  rangeRequestCount: number;
-  rangeFailures: number;
-  outOfOrderRequests: number;
-  failureRate: number;
-}
-
-const RANGE_POLICY = {
-  failureThreshold: 0.15,
-  minSamples: 5,
-  penaltyDuration: 3600,
-  rehabAfter: 86400,
-};
-```
+All transcoding uses **HLS transport** with:
+- 4-second segments
+- MPEG-TS container (`.ts`)
+- EVENT playlist type for progressive writing
 
 ---
 
-## 6. Media Analysis & Metadata
+## 9. Media Analysis & Metadata
 
-### 6.1 Media Scanning Pipeline
-
-#### 6.1.1 Scan Triggers
-
-| Trigger | Action | Priority |
-|---------|--------|----------|
-| New file detected (inotify/fswatch) | Queue full scan | High |
-| File modified (mtime change) | Queue rescan | High |
-| Manual library refresh | Queue all unscanned | Medium |
-| Scheduled maintenance | Rescan failed items | Low |
-| User requests playback of unscanned | Inline scan (blocking) | Critical |
-
-#### 6.1.2 ffprobe Workflow
+### 9.1 Probe Result Structure
 
 ```typescript
 interface MediaProbeResult {
   filePath: string;
   fileSize: number;
-  mtime: number;
-  fingerprint: string;
+  fingerprint: string;  // `${fileSize}_${mtime}`
   
   format: {
     name: string;
@@ -396,1229 +444,796 @@ interface MediaProbeResult {
   audioStreams: AudioStreamInfo[];
   subtitleStreams: SubtitleStreamInfo[];
   chapters: ChapterInfo[];
-  attachments: AttachmentInfo[];
   
-  keyframeAnalysis: KeyframeAnalysis;
+  keyframeAnalysis?: KeyframeAnalysis;
   contentQuirks: ContentQuirks;
-  
-  scannedAt: Date;
-  scanDurationMs: number;
-  ffprobeVersion: string;
 }
 
 interface VideoStreamInfo {
   index: number;
   codec: string;
-  profile: string;
-  level: number;
+  profile?: string;
+  level?: number;
   width: number;
   height: number;
   frameRate: number;
-  frameRateMode: 'cfr' | 'vfr';
-  bitrate: number;
-  pixelFormat: string;
-  colorSpace: string;
-  colorTransfer: string;
-  colorPrimaries: string;
+  bitrate?: number;
   isInterlaced: boolean;
-  fieldOrder?: 'tt' | 'bb' | 'tb' | 'bt';
-  hdrFormat?: 'hdr10' | 'hdr10+' | 'dolby_vision' | 'hlg' | 'sdr';
-  dolbyVisionProfile?: 5 | 7 | 8;
-  dolbyVisionLevel?: number;
-  hasDolbyVisionEL?: boolean;
-  hasHdr10PlusMetadata?: boolean;
-  displayAspectRatio: string;
-  sampleAspectRatio: string;
-  default: boolean;
-  forced: boolean;
-  title?: string;
-  language?: string;
-}
-
-interface AudioStreamInfo {
-  index: number;
-  codec: string;
-  profile?: string;
-  channels: number;
-  channelLayout: string;
-  sampleRate: number;
-  bitrate: number;
-  bitDepth?: number;
-  language: string;
-  title?: string;
-  default: boolean;
-  forced: boolean;
-  isCommentary: boolean;
-  isDescriptive: boolean;
-}
-
-interface SubtitleStreamInfo {
-  index: number;
-  codec: string;
-  type: 'text' | 'image';
-  language: string;
-  title?: string;
-  default: boolean;
-  forced: boolean;
-  isSDH: boolean;
-  isCommentary: boolean;
-  hearingImpaired: boolean;
-}
-
-interface ChapterInfo {
-  index: number;
-  startTime: number;
-  endTime: number;
-  title: string;
-}
-```
-
-#### 6.1.3 ffprobe Commands
-
-```bash
-# Full probe with chapters and attachments
-ffprobe -v quiet \
-  -print_format json \
-  -show_format \
-  -show_streams \
-  -show_chapters \
-  -show_programs \
-  input.mkv
-
-# Keyframe analysis
-ffprobe -v quiet \
-  -select_streams v:0 \
-  -show_entries packet=pts_time,flags \
-  -of csv=p=0 \
-  input.mkv | grep ',K' | cut -d',' -f1
-
-# Frame analysis for interlacing detection
-ffprobe -v quiet \
-  -select_streams v:0 \
-  -show_entries frame=interlaced_frame,top_field_first \
-  -read_intervals "%+#100" \
-  -of csv=p=0 \
-  input.mkv
-```
-
-#### 6.1.4 Content Quirks Detection
-
-```typescript
-interface ContentQuirks {
-  isInterlaced: boolean;
-  interlaceType?: 'tff' | 'bff' | 'mixed';
-  isVariableFrameRate: boolean;
-  vfrRange?: { min: number; max: number };
-  hasIrregularKeyframes: boolean;
-  isTelecined: boolean;
-  hasAudioSyncIssues: boolean;
-  hasBFrames: boolean;
-  bFrameCount?: number;
-  isLegacyContainer: boolean;
-  requiresContainerFix: boolean;
-  audioDelayMs?: number;
-}
-```
-
-### 6.2 Chapter Marker Handling
-
-```typescript
-interface ChapterMarker {
-  index: number;
-  title: string;
-  startTimeSeconds: number;
-  endTimeSeconds: number;
-  type: 'chapter' | 'intro' | 'credits' | 'recap' | 'preview';
-}
-
-function classifyChapter(chapter: ChapterInfo): ChapterMarker['type'] {
-  const titleLower = chapter.title.toLowerCase();
-  
-  const introPatterns = [/^intro$/i, /^opening$/i, /^op$/i, /^theme$/i];
-  if (introPatterns.some(p => p.test(titleLower))) return 'intro';
-  
-  const creditsPatterns = [/^credits$/i, /^ending$/i, /^ed$/i, /end credits/i];
-  if (creditsPatterns.some(p => p.test(titleLower))) return 'credits';
-  
-  if (/recap/i.test(titleLower) || /previously/i.test(titleLower)) return 'recap';
-  if (/preview/i.test(titleLower) || /next episode/i.test(titleLower)) return 'preview';
-  
-  return 'chapter';
+  hdrFormat?: 'sdr' | 'hdr10' | 'hdr10plus' | 'hlg' | 'dv';
 }
 ```
 
 ---
 
-## 7. Transcoding Engine Architecture
+## 10. Transcoding Engine Architecture
 
-### 7.1 Flow Overview
+### 10.1 Session Creation Flow
 
 ```
-Playback Request
-      │
-      ▼
-┌─────────────┐
-│   Media     │ ──── Is media scanned? ────▶ No: Inline scan
-│   Lookup    │
-└─────────────┘
-      │ Yes
-      ▼
-┌─────────────┐
-│  Decision   │ ──── Can direct play? ────▶ Stream directly
-│   Engine    │
-└─────────────┘
-      │ No
-      ▼
-┌─────────────┐
-│  Playback   │ ──── Check hierarchy: Remux → Remux-HLS → Transcode
-│  Hierarchy  │
-└─────────────┘
-      │
-      ▼
-┌─────────────┐
-│   Quirks    │ ──── Apply deinterlace, VFR fix, etc.
-│   Handler   │
-└─────────────┘
-      │
-      ▼
-┌─────────────┐
-│  Profile    │ ──── Select best profile
-│  Selector   │
-└─────────────┘
-      │
-      ▼
-┌─────────────┐
-│  FFmpeg     │ ──── Generate command
-│  Builder    │
-└─────────────┘
-      │
-      ▼
-┌─────────────┐
-│  Process    │ ──── Spawn, monitor, handle errors
-│  Manager    │
-└─────────────┘
-      │
-      ▼
-┌─────────────┐
-│  Segment    │ ──── Watch for segments, update playlists
-│  Watcher    │
-└─────────────┘
+POST /api/stream/session
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│     StreamingService.createSession()     │
+│  1. Lookup media file in database        │
+│  2. Probe media with FFprobe             │
+│  3. Detect client capabilities           │
+│  4. Generate PlaybackPlan                │
+│  5. Create session output directory      │
+│  6. Write master.m3u8 to disk            │
+│  7. Start FFmpeg transcode process       │
+│  8. Return session info + URLs           │
+└─────────────────────────────────────────┘
 ```
 
-### 7.2 Admission Control & Queue Policy
+### 10.2 TranscodeSessionManager
+
+Manages concurrent FFmpeg processes with admission control:
 
 ```typescript
-interface AdmissionPolicy {
-  maxConcurrent: number;
-  maxQueueDepth: 20;
-  priorityLevels: {
-    interactive: 100,
-    prefetch: 50,
-    trickplay: 30,
-    background: 10,
-  };
-}
-
-const QUEUE_POLICY = {
-  interactiveTimeout: 10_000,
-  prefetchTimeout: 30_000,
-  trickplayTimeout: 600_000,
-  backgroundTimeout: 300_000,
-  starvationProtection: true,
+const SESSION_CONFIG = {
+  cacheDir: '/tmp/mediaserver/transcode',
+  segmentDuration: 4,
+  maxSegmentsBehindPlayhead: 5,
+  firstSegmentTimeoutMs: 45000,  // 45s for slow 4K transcodes
+  noProgressTimeoutMs: 60000,    // 60s
 };
 ```
 
+### 10.3 FFmpeg Process Lifecycle
+
+1. **Spawn**: FFmpeg started with arguments from PlaybackPlan
+2. **Monitor**: Watch for segment files appearing on disk
+3. **Track**: Count segments, monitor progress via stderr parsing
+4. **Timeout**: Kill if no progress after timeout
+5. **Cleanup**: Remove session files on end
+
+#### Stopping FFmpeg Safely
+
+When stopping FFmpeg (seek, pause, or end), use this sequence to prevent race conditions:
+
+```typescript
+// In TranscodeSession:
+async stopFFmpeg(): Promise<void> {
+  this.ffmpegState.status = 'stopping';  // MUST set before kill
+  ffmpeg.kill('SIGTERM');
+  // Wait for close event
+}
+
+// In handleFFmpegExit:
+if (this.ffmpegState.status === 'stopping') {
+  // Intentional stop - do NOT restart
+  this.ffmpegState.status = 'stopped';
+} else if (this.state.status === 'active') {
+  // Unexpected exit - attempt restart
+  this.handleFFmpegFailure();
+}
+```
+
+#### Seek Mutex
+
+Seeks must be serialized to prevent multiple FFmpeg processes:
+
+```typescript
+private seekInProgress: Promise<void> | null = null;
+
+async seek(position: number): Promise<void> {
+  // Wait for any in-progress seek
+  if (this.seekInProgress) {
+    await this.seekInProgress;
+  }
+  
+  this.seekInProgress = this.doSeek(position);
+  try {
+    await this.seekInProgress;
+  } finally {
+    this.seekInProgress = null;
+  }
+}
+```
+
+#### Session Status Transitions
+
+```
+active → ending → ended       (normal end)
+active → paused → active      (pause/resume)
+active → error                (fatal failure)
+```
+
+The `ending` state is critical: it's set BEFORE calling `stopFFmpeg()` to signal that any FFmpeg exit during this window is intentional and should NOT trigger a restart.
+
 ---
 
-## 8. HLS Correctness Contracts
+## 11. HLS Implementation
 
-### 8.1 Segment Container Format
+### 11.1 Playlist Architecture
 
-| Condition | Format | Rationale |
-|-----------|--------|-----------|
-| Default | TS (`.ts`) | Widest compatibility |
-| fMP4 required | fMP4 (`.m4s`) | Only if client requests via `_HLS_msn` |
-| HEVC passthrough | fMP4 | Better HEVC support in fMP4 |
+**Master Playlist** (`master.m3u8`):
+- Written by server at session creation
+- Contains variant stream info
+- Points to `playlist.m3u8`
 
-### 8.2 Playlist Semantics
+**Media Playlist** (`playlist.m3u8`):
+- Written by FFmpeg progressively
+- Uses `EVENT` type for live transcoding
+- Server appends `#EXT-X-ENDLIST` when complete
 
-```
-#EXTM3U
-#EXT-X-VERSION:7
-#EXT-X-TARGETDURATION:4
-#EXT-X-MEDIA-SEQUENCE:0
-#EXT-X-PLAYLIST-TYPE:EVENT
-
-... segments ...
-
-#EXT-X-ENDLIST
-```
-
-| State | Playlist Type | ENDLIST |
-|-------|---------------|---------|
-| Transcoding in progress | `EVENT` | Absent |
-| Transcode complete | `EVENT` | Present |
-| Cached/pre-transcoded | `VOD` | Present |
-
-### 8.3 Epoch & Discontinuity Model
-
-**Discontinuity triggers (new epoch required):**
-
-| Event | Action |
-|-------|--------|
-| FFmpeg restart (crash recovery) | `#EXT-X-DISCONTINUITY` |
-| Seek to non-transcoded region | New epoch, discontinuity |
-| Quality/profile change | New epoch, discontinuity |
-| Audio track switch (if muxed) | New epoch, discontinuity |
-| Subtitle burn-in toggle | New epoch, discontinuity |
-| HDR/tone-map mode change | New epoch, discontinuity |
-| Playback speed change | New epoch, discontinuity |
-
-### 8.4 Keyframe Alignment for ABR
+### 11.2 FFmpeg HLS Output Arguments
 
 ```bash
--g 96 \
--keyint_min 96 \
--sc_threshold 0 \
--force_key_frames "expr:gte(t,n_forced*4)"
+ffmpeg -i input.mkv \
+  -c:v libx264 -preset fast -crf 23 \
+  -c:a aac -b:a 128k \
+  -f hls \
+  -hls_time 4 \                          # 4-second segments
+  -hls_list_size 0 \                     # Keep all segments in playlist
+  -hls_playlist_type event \             # Progressive writing
+  -hls_segment_filename segment_%05d.ts \
+  -start_number 0 \
+  -hls_flags independent_segments \
+  -muxdelay 0 \
+  -muxpreload 0 \
+  -avoid_negative_ts make_zero \
+  -start_at_zero \
+  -g 120 \                               # GOP size (4s @ 30fps)
+  -keyint_min 120 \
+  -sc_threshold 0 \                      # Disable scene change detection
+  -force_key_frames expr:gte(t,n_forced*4) \
+  playlist.m3u8
 ```
 
----
+### 11.3 Key HLS Flags Explained
 
-## 9. Live Transcoding & Seek Behavior
+| Flag | Value | Purpose |
+|------|-------|---------|
+| `-hls_time` | 4 | 4-second segment duration |
+| `-hls_list_size` | 0 | Keep all segments (don't delete old ones) |
+| `-hls_playlist_type` | event | Progressive writing for live transcoding |
+| `-hls_flags` | independent_segments | Each segment self-contained |
+| `-muxdelay 0` | - | Lower latency startup |
+| `-avoid_negative_ts` | make_zero | Clean PTS timestamps |
+| `-start_at_zero` | - | PTS starts at 0 |
+| `-force_key_frames` | expr:gte(t,n_forced*4) | Keyframe every 4 seconds |
 
-### 9.1 Instant Playback Timeline
+### 11.4 HLS.js Configuration (Client)
 
-```
-T+0.0s   User presses Play → Client sends request
-T+0.3s   Server creates session → Profile selected, cache checked
-T+0.5s   FFmpeg spawned → Begins transcoding first segment
-T+2-4s   First segment ready (4 seconds) → Playlist updated
-T+3-5s   Playback begins → Server continues transcoding ahead
-T+5s+    Lookahead buffer builds → Stay 30-60s ahead
-```
-
-### 9.2 Resume Position Contract
-
-**Resume time is always stored in source-file time, not segment time.**
+The web player uses hls.js with specific configuration for "watch while transcoding":
 
 ```typescript
-interface PlaybackPosition {
-  mediaId: string;
-  userId: string;
-  sourceTimeSeconds: number;
-  totalDuration: number;
-  updatedAt: Date;
-  playbackSpeed: number;
-}
+export const hlsConfig: Partial<Hls['config']> = {
+  // Start from beginning, not "live edge"
+  startLevel: -1,
+  autoStartLoad: true,
 
-const RESUME_TOLERANCE = 2;  // ±2 seconds acceptable drift
+  // Buffer settings
+  maxBufferLength: 30,
+  maxMaxBufferLength: 60,
+  backBufferLength: Infinity,  // Keep all buffered content
+
+  // Treat EVENT playlist as VOD-like (don't jump to live edge)
+  liveSyncDuration: 9999,
+  liveMaxLatencyDuration: 10000,  // MUST be > liveSyncDuration
+  liveDurationInfinity: false,
+
+  // Error recovery
+  fragLoadingMaxRetry: 4,
+  manifestLoadingMaxRetry: 4,
+  levelLoadingMaxRetry: 4,
+};
 ```
 
-### 9.3 Seek Handling
+**Critical**: `liveMaxLatencyDuration` MUST be greater than `liveSyncDuration` or hls.js throws a validation error.
+
+### 11.5 Auth Token Injection
+
+HLS.js requests need authorization headers:
 
 ```typescript
-async function handleSeek(sessionId: string, targetTime: number): Promise<SeekResponse> {
-  const session = getSession(sessionId);
-  const targetSegment = Math.floor(targetTime / SEGMENT_DURATION);
-  
-  if (session.segments.ready.includes(targetSegment)) {
-    return { status: 'ready', segmentIndex: targetSegment };
-  }
-  
-  return await seekWithTimeout(session, targetTime);
-}
-```
-
----
-
-## 10. Audio Track & Subtitle Switching
-
-### 10.1 Audio Group Strategy
-
-| Scenario | Strategy | Rationale |
-|----------|----------|-----------|
-| Single audio track | Muxed with video | Simpler, no sync issues |
-| Multiple tracks, all AAC-compatible | Separate audio groups | Instant switching |
-| Multiple tracks, some need transcode | Separate groups, transcode as needed | Flexibility |
-| Low-end client | Muxed, single track | Fewer requests |
-
-### 10.2 Audio Codec Decision Matrix
-
-| Source Codec | Client AAC | Client AC3 | Client EAC3 | Action |
-|--------------|------------|------------|-------------|--------|
-| AAC | ✅ | - | - | Passthrough |
-| AC3 | ❌ | ✅ | - | Passthrough |
-| AC3 | ❌ | ❌ | - | Transcode → AAC |
-| EAC3 | ❌ | - | ✅ | Passthrough |
-| TrueHD | ❌ | ✅ | - | Transcode → AC3 5.1 |
-| TrueHD | ❌ | ❌ | - | Transcode → AAC stereo |
-| DTS | ❌ | ✅ | - | Transcode → AC3 |
-| DTS | ❌ | ❌ | - | Transcode → AAC |
-
-### 10.3 Subtitle Handling
-
-| Format | Type | Render Method | Track Switching |
-|--------|------|---------------|-----------------|
-| WebVTT/SRT | Text | Client-side | ✅ Instant |
-| ASS/SSA simple | Text | Convert to WebVTT | ✅ Instant |
-| ASS/SSA complex | Text | Burn into video | ❌ New epoch |
-| PGS/VOBSUB | Image | Burn into video | ❌ New epoch |
-
----
-
-## 11. HDR Handling
-
-### 11.1 HDR Format Detection
-
-| HDR Type | Detection | Pass Through | Tone Map |
-|----------|-----------|--------------|----------|
-| HDR10 | color_transfer = smpte2084 | If client supports | zscale + tonemap |
-| HDR10+ | Dynamic metadata present | If client supports | Strip to HDR10 or tonemap |
-| Dolby Vision Profile 5 | Codec contains "dvhe", profile=5 | Only DV-capable clients | Convert to HDR10 or tonemap |
-| Dolby Vision Profile 7 | Codec contains "dvhe", profile=7 | Only DV-capable clients | **Cannot fallback** - must transcode |
-| Dolby Vision Profile 8 | Codec contains "dvhe", profile=8 | DV clients or HDR10 fallback | HDR10 base layer or tonemap |
-| HLG | color_transfer = arib-std-b67 | If client supports | Tonemap |
-
-### 11.2 Dolby Vision Handling
-
-```typescript
-function getDVPlaybackStrategy(dv: DolbyVisionInfo, client: ClientCapabilities): DVStrategy {
-  if (client.hdr.dolbyVision && client.hdr[`dvProfile${dv.profile}`]) {
-    return { mode: 'passthrough' };
-  }
-  
-  if (dv.profile === 8 && dv.hasHDR10BaseLayer && client.hdr.hdr10) {
-    return { mode: 'extract_hdr10_base' };
-  }
-  
-  if ((dv.profile === 5 || dv.profile === 8) && client.hdr.hdr10) {
-    return { mode: 'convert_to_hdr10' };
-  }
-  
-  if (dv.profile === 7) {
-    return { mode: 'tonemap_to_sdr', reason: 'DV_PROFILE_7_NO_FALLBACK' };
-  }
-  
-  return { mode: 'tonemap_to_sdr' };
-}
-```
-
-### 11.3 Tone Mapping Filters
-
-```bash
-# Software (CPU) - HDR10 to SDR
--vf "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
-
-# NVIDIA (GPU) - HDR10 to SDR
--vf "tonemap_cuda=tonemap=hable:desat=0:format=yuv420p"
-```
-
----
-
-## 12. Content Quirks Handling
-
-### 12.1 Interlaced Content
-
-#### Detection
-
-```typescript
-async function detectInterlacing(filePath: string): Promise<InterlaceInfo> {
-  const result = await exec(`ffmpeg -i "${filePath}" -vf "idet" -frames:v 500 -f null - 2>&1`);
-  
-  const tff = parseInt(result.match(/TFF:\s*(\d+)/)?.[1] || '0');
-  const bff = parseInt(result.match(/BFF:\s*(\d+)/)?.[1] || '0');
-  const progressive = parseInt(result.match(/Progressive:\s*(\d+)/)?.[1] || '0');
-  
-  const total = tff + bff + progressive;
-  const interlacedRatio = (tff + bff) / total;
+export async function createHlsConfig(dataSaver = false): Promise<Partial<Hls['config']>> {
+  const token = await getAccessToken();
   
   return {
-    isInterlaced: interlacedRatio > 0.5,
-    fieldOrder: tff > bff ? 'tt' : 'bb',
-    confidence: interlacedRatio > 0.8 ? 'high' : 'medium',
+    ...baseConfig,
+    xhrSetup: (xhr: XMLHttpRequest, url: string) => {
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+    },
   };
 }
 ```
 
-#### Deinterlacing Filters
-
-| Filter | Quality | Speed | Use Case |
-|--------|---------|-------|----------|
-| `yadif` | Good | Fast | Default, real-time |
-| `bwdif` | Better | Medium | Higher quality, more CPU |
-| `w3fdif` | Best | Slow | Offline/pre-transcode only |
-| `yadif_cuda` | Good | Fast | GPU-accelerated |
-
-```bash
-# Default deinterlacing
--vf "yadif=0:-1:0"
-
-# NVIDIA GPU deinterlacing
--vf "yadif_cuda=0:-1:0"
-```
-
-### 12.2 Variable Frame Rate (VFR)
-
-```bash
-# Convert VFR to CFR
--vsync cfr -r 29.97
-```
-
-### 12.3 Telecined Content (3:2 Pulldown)
-
-```bash
-# Inverse telecine
--vf "fieldmatch,decimate"
-```
-
-### 12.4 Legacy Container Handling
-
-| Container | Issues | Handling |
-|-----------|--------|----------|
-| AVI | No streaming support | Always remux to MP4/MKV |
-| WMV/ASF | DRM issues, poor seek | Remux or transcode |
-| RMVB | Proprietary | Full transcode required |
-| FLV | Flash-era | Remux to MP4 |
-| VOB (DVD) | Multiple angles | Extract main title, remux |
-| M2TS (Blu-ray) | Complex structure | Remux to MKV |
-
-### 12.5 Aspect Ratio Handling
-
-```typescript
-function getScalingFilter(source: AspectRatioInfo, target: { width: number; height: number }): string {
-  const filters: string[] = [];
-  
-  filters.push(`scale=${target.width}:${target.height}:force_original_aspect_ratio=decrease`);
-  filters.push(`pad=${target.width}:${target.height}:(ow-iw)/2:(oh-ih)/2`);
-  
-  return filters.join(',');
-}
-```
+**Note**: `getAccessToken()` is async because it must wait for Zustand store hydration.
 
 ---
 
-## 13. Trickplay & Seek Preview
+## 12. Session Management
 
-### 13.1 Overview
-
-Trickplay provides thumbnail previews during seeking, showing users a visual preview of where they're scrubbing to.
-
-### 13.2 Formats
-
-#### WebVTT Thumbnails (Web/Mobile)
+### 12.1 Session Lifecycle
 
 ```
-WEBVTT
-
-00:00:00.000 --> 00:00:10.000
-thumbnails/thumb_0001.jpg#xywh=0,0,320,180
-
-00:00:10.000 --> 00:00:20.000
-thumbnails/thumb_0001.jpg#xywh=320,0,320,180
+Create Session
+      │
+      ├── Generate PlaybackPlan
+      ├── Create output directory
+      ├── Write master.m3u8
+      ├── Start FFmpeg process
+      │
+      ▼
+Active Session
+      │
+      ├── Client fetches playlists/segments
+      ├── Heartbeat updates lastAccessAt
+      │
+      ▼
+Session End (one of):
+      │
+      ├── Client calls DELETE /session
+      ├── Idle timeout (60s without heartbeat)
+      └── FFmpeg process ends
+      │
+      ▼
+Cleanup
+      │
+      ├── Kill FFmpeg process (if running)
+      ├── Remove session files
+      └── Clear from memory
 ```
 
-#### BIF Format (Roku/Fire TV)
+### 12.2 Automatic Session Cleanup
 
-Binary format with JPEG frames at fixed intervals.
-
-### 13.3 Generation Pipeline
+The StreamingService runs a cleanup timer to remove idle sessions:
 
 ```typescript
-interface TrickplayConfig {
-  interval: number;           // seconds between thumbnails (default: 10)
-  width: number;              // thumbnail width (default: 320)
-  height: number;             // computed from aspect ratio
-  spriteColumns: number;      // thumbnails per row (default: 5)
-  spriteRows: number;         // rows per sprite (default: 5)
-  quality: number;            // JPEG quality (default: 75)
-  formats: ('webvtt' | 'bif')[];
-}
-```
-
-### 13.4 FFmpeg Thumbnail Extraction
-
-```bash
-# Extract thumbnails at 10-second intervals
-ffmpeg -i input.mkv \
-  -vf "fps=1/10,scale=320:-1" \
-  -q:v 5 \
-  thumbnails/thumb_%04d.jpg
-
-# With hardware acceleration
-ffmpeg -hwaccel cuda -i input.mkv \
-  -vf "fps=1/10,scale_cuda=320:-1" \
-  -q:v 5 \
-  thumbnails/thumb_%04d.jpg
-```
-
----
-
-## 14. User Experience Features
-
-### 14.1 Playback Speed Control
-
-| Speed | Use Case | Audio Handling |
-|-------|----------|----------------|
-| 0.5x | Learning content | Pitch preserved |
-| 0.75x | Detailed viewing | Pitch preserved |
-| 1.0x | Normal | Normal |
-| 1.25x | Efficient watching | Pitch preserved |
-| 1.5x | Quick review | Pitch preserved |
-| 2.0x | Skimming | Pitch preserved |
-
-```bash
-# 1.5x speed with pitch-preserved audio
-ffmpeg -i input.mkv \
-  -vf "setpts=0.667*PTS" \
-  -af "atempo=1.5" \
-  output.mp4
-```
-
-### 14.2 Audio Normalization
-
-```bash
-# EBU R128 loudness normalization
-ffmpeg -i input.mkv \
-  -af "loudnorm=I=-16:TP=-1.5:LRA=11" \
-  -c:v copy -c:a aac output.mp4
-
-# Night mode (dynamic range compression)
-ffmpeg -i input.mkv \
-  -af "compand=attacks=0:points=-80/-80|-45/-15|-27/-9|0/-7|20/-7" \
-  -c:v copy -c:a aac output.mp4
-```
-
-### 14.3 Intro/Credits Skip
-
-```typescript
-interface SkipMarker {
-  mediaId: string;
-  type: 'intro' | 'credits' | 'recap' | 'preview';
-  startTime: number;
-  endTime: number;
-  source: 'chapter' | 'manual' | 'auto_detected';
-  confidence: number;
-}
-
-interface SkipPreferences {
-  introSkip: 'off' | 'prompt' | 'auto';
-  creditsSkip: 'off' | 'prompt' | 'auto';
-  recapSkip: 'off' | 'prompt' | 'auto';
-}
-```
-
-### 14.4 Language Preferences
-
-```typescript
-interface UserLanguagePreferences {
-  userId: string;
-  preferredAudioLanguages: string[];  // ['jpn', 'eng']
-  preferOriginalLanguage: boolean;
-  preferSurroundSound: boolean;
-  avoidDubbedAudio: boolean;
-  preferredSubtitleLanguages: string[];
-  subtitleMode: 'off' | 'auto' | 'always' | 'foreign_only';
-  preferSDH: boolean;
-  preferForcedOnly: boolean;
-  fallbackAudioLanguage: string;
-  fallbackSubtitleLanguage: string;
-}
-```
-
-### 14.5 Watch History
-
-```typescript
-interface WatchHistoryEntry {
-  id: string;
-  userId: string;
-  mediaId: string;
-  positionSeconds: number;
-  durationSeconds: number;
-  progressPercent: number;
-  completed: boolean;
-  watchedAt: Date;
-  deviceId: string;
-  playbackSpeed: number;
-  audioTrack: number;
-  subtitleTrack: number | null;
-}
-
-const WATCH_HISTORY_POLICY = {
-  markCompletedThreshold: 0.90,
-  resumeThreshold: 0.05,
-  resumeFromEndThreshold: 0.95,
-  historyRetentionDays: 365,
-};
-```
-
----
-
-## 15. Error Recovery & Resilience
-
-### 15.1 Error Types
-
-| Type | Cause | Retryable | Action |
-|------|-------|-----------|--------|
-| encoder_failure | HW encoder init failed | Yes | Software fallback |
-| input_error | Can't read source | No | Abort with message |
-| output_error | Disk full | Yes | Clean cache, reduce quality |
-| resource_exhaustion | Out of memory | Yes | Reduce quality |
-| ffmpeg_crash | Unknown crash | Yes | Retry 1-2 times |
-| quirk_handling_failure | Deinterlace/VFR fix failed | Yes | Skip quirk handling |
-
-### 15.2 Timeout Policy
-
-| Timeout | Value | Action on Breach |
-|---------|-------|------------------|
-| First segment deadline | 10s | Restart with lower quality |
-| No-progress timeout | 30s | Kill FFmpeg, retry |
-| Total session timeout | 4h | Terminate, log |
-| Seek segment timeout | 15s | Return error to client |
-| Media scan timeout | 120s | Mark failed, queue retry |
-| Trickplay generation timeout | 600s | Mark failed, retry |
-
-### 15.3 Restart Budget
-
-```typescript
-const RESTART_POLICY = {
-  maxRestartsPerSession: 3,
-  backoffMs: [1000, 3000, 10000],
-  resetAfterSuccessMs: 60_000,
-};
-```
-
-### 15.4 Poison Media Policy
-
-```typescript
-interface MediaHealth {
-  mediaId: string;
-  failureCount: number;
-  lastFailure: Date;
-  failureReasons: string[];
-  status: 'healthy' | 'suspect' | 'poison';
-}
-
-const POISON_POLICY = {
-  failureThreshold: 3,
-  poisonThreshold: 5,
-  decayPeriodDays: 7,
-};
-```
-
----
-
-## 16. Caching Strategy
-
-### 16.1 Cache Structure
-
-```
-/data/transcode-cache/
-├─ {cacheKey}/
-│   ├─ video/segment_00000.ts ...
-│   ├─ audio_0/segment_00000.ts ...
-│   ├─ master.m3u8
-│   └─ .meta.json
-├─ trickplay/
-│   └─ {mediaId}/
-│       ├─ thumbnails.vtt
-│       ├─ thumbnails.bif
-│       └─ sprite_0000.jpg ...
-```
-
-### 16.2 Versioned Cache Key
-
-```typescript
-interface CacheKeyComponents {
-  sourceFingerprint: string;
-  pipelineSchemaVersion: number;
-  ffmpegMajorVersion: number;
-  encoderId: string;
-  profileId: string;
-  settingsHash: string;
-  audioTrackIndex: number;
-  subtitleMode: 'none' | 'sidecar' | 'burn_idx_N';
-  hdrMode: 'passthrough' | 'tonemap_hable' | 'tonemap_reinhard';
-  quirksApplied: string[];
-  playbackSpeed: number;
-  audioNormalization: boolean;
-}
-```
-
-### 16.3 Eviction Policy
-
-| Rule | Details |
-|------|---------|
-| LRU | Delete least recently accessed first |
-| Max Size | Default 50GB |
-| Active Protection | **Never evict currently playing sessions** |
-| Age Limit | Delete after 7 days unused |
-| Emergency | Clear oldest when disk < 5GB |
-| Trickplay Priority | Evict trickplay before transcodes |
-
----
-
-## 17. Security Considerations
-
-### 17.1 Path Traversal Prevention
-
-```typescript
-function validatePath(sessionId: string, filename: string): string {
-  if (!SESSION_ID_REGEX.test(sessionId)) throw new Error('Invalid session');
-  
-  const fullPath = path.join(CACHE_DIR, sessionId, filename);
-  const resolved = path.resolve(fullPath);
-  
-  if (!resolved.startsWith(path.resolve(CACHE_DIR))) {
-    throw new Error('Path traversal attempt');
-  }
-  return resolved;
-}
-```
-
-### 17.2 Signed URL Contract
-
-```typescript
-interface SignedURLPayload {
-  sessionId: string;
-  userId: string;
-  mediaId: string;
-  exp: number;
-  iat: number;
-  scope: 'playlist' | 'segment' | 'full';
-}
-
-const SIGNED_URL_POLICY = {
-  playlistTTL: 3600,
-  segmentTTL: 300,
-  refreshWindow: 60,
-  algorithm: 'HS256',
-};
-```
-
-### 17.3 Rate Limiting
-
-| Limit | Value |
-|-------|-------|
-| Max sessions per user | 3 |
-| Max new sessions/minute | 5 |
-| Max total transcodes | Server capacity |
-| Max API requests/minute | 100 |
-
----
-
-## 18. Bandwidth Measurement & Adaptation
-
-### 18.1 Adaptation Strategy
-
-| Buffer Health | Action |
-|---------------|--------|
-| > 30s | Try upgrading quality |
-| 10-30s | Maintain current |
-| 5-10s | Downgrade quality |
-| < 5s | Emergency: lowest + smaller segments |
-
----
-
-## 19. Offline Downloads Support
-
-### 19.1 Download Flow
-
-1. User requests download
-2. Select quality tier
-3. Queue transcode (lower priority)
-4. Generate complete MP4 file
-5. Store record in database
-6. Start expiration timer (30 days)
-
-### 19.2 Format
-
-- Single MP4 file (not HLS)
-- H.264 + AAC for compatibility
-- Optional encryption (AES-128)
-
----
-
-## 20. Multi-Version Media Handling
-
-### 20.1 Version Types
-
-| Version Type | Example | Selection Criteria |
-|--------------|---------|-------------------|
-| Quality | 1080p vs 4K | Client capability, bandwidth |
-| Cut | Theatrical vs Extended | User preference |
-| Edition | Original vs Remaster | User preference |
-| 3D | 2D vs 3D | Device capability |
-
-### 20.2 Version Grouping
-
-```typescript
-interface MediaVersionGroup {
-  groupId: string;
-  primaryMediaId: string;
-  versions: MediaVersion[];
-}
-
-interface MediaVersion {
-  mediaId: string;
-  versionType: 'quality' | 'cut' | 'edition' | '3d';
-  label: string;
-  resolution: string;
-  hdrFormat?: string;
-  runtime?: number;
-  isDefault: boolean;
-  priority: number;
-}
-```
-
----
-
-## 21. Monitoring & Observability
-
-### 21.1 Key Metrics
-
-```
-transcode_sessions_active           gauge
-transcode_queue_depth               gauge
-transcode_speed_ratio               histogram
-transcode_errors_total              counter
-cache_size_bytes                    gauge
-cache_hit_rate                      gauge
-direct_play_rate                    gauge
-playback_start_latency_seconds      histogram
-scan_queue_depth                    gauge
-trickplay_coverage_ratio            gauge
-```
-
-### 21.2 Alerting Thresholds
-
-| Condition | Severity |
-|-----------|----------|
-| Queue > 10 for 5min | Warning |
-| Error rate > 5% in 15min | Critical |
-| Disk < 10GB | Critical |
-| Encode speed < 0.8x | Warning |
-| Playback start latency p95 > 10s | Warning |
-
-### 21.3 Structured Decision Logs
-
-```typescript
-interface PlaybackDecisionLog {
-  timestamp: string;
-  sessionId: string;
-  userId: string;
-  mediaId: string;
-  decision: 'direct_play' | 'remux' | 'remux_hls' | 'transcode_hls';
-  reasonCode: PlaybackReasonCode;
-  clientType: string;
-  networkType: 'lan' | 'remote';
-  sourceCodec: string;
-  targetCodec: string;
-  profile: string;
-  quirksApplied: string[];
-  decisionLatencyMs: number;
-}
-
-type PlaybackReasonCode =
-  | 'CLIENT_SUPPORTS_SOURCE'
-  | 'CONTAINER_INCOMPATIBLE'
-  | 'RANGE_UNRELIABLE'
-  | 'KEYFRAMES_SPARSE'
-  | 'CODEC_UNSUPPORTED'
-  | 'HDR_TONEMAP_REQUIRED'
-  | 'DV_PROFILE_INCOMPATIBLE'
-  | 'RESOLUTION_DOWNSCALE'
-  | 'BITRATE_CONSTRAINED'
-  | 'BURN_IN_SUBTITLES'
-  | 'DEINTERLACE_REQUIRED'
-  | 'VFR_CONVERSION_REQUIRED'
-  | 'SPEED_CHANGE_ACTIVE'
-  | 'FORCED_FALLBACK';
-```
-
----
-
-## 22. Operational Concerns
-
-### 22.1 Graceful Shutdown
-
-```typescript
-async function gracefulShutdown(signal: string): Promise<void> {
-  logger.info(`Received ${signal}, initiating graceful shutdown`);
-  
-  // 1. Stop accepting new requests
-  server.close();
-  
-  // 2. Stop accepting new transcode jobs
-  transcodeQueue.pause();
-  
-  // 3. Save session state for resume
-  const activeSessions = await getActiveSessions();
-  for (const session of activeSessions) {
-    await saveSessionState(session.id, {
-      mediaId: session.mediaId,
-      position: session.currentSourceTime,
-      profile: session.profile,
-    });
-  }
-  
-  // 4. Wait for active transcodes (with timeout)
-  await waitForDrain(30_000);
-  
-  // 5. Force kill remaining
-  await killRemainingTranscodes();
-  
-  // 6. Close database
-  await database.close();
-  
-  process.exit(0);
-}
-
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-```
-
-### 22.2 Database Migrations
-
-```typescript
-interface Migration {
-  version: number;
-  name: string;
-  up: (db: Database) => Promise<void>;
-  down: (db: Database) => Promise<void>;
-}
-
-async function runMigrations(db: Database): Promise<void> {
-  const currentVersion = await getCurrentSchemaVersion(db);
-  
-  for (const migration of migrations) {
-    if (migration.version > currentVersion) {
-      await db.exec('BEGIN TRANSACTION');
-      try {
-        await migration.up(db);
-        await db.run('INSERT INTO schema_version (version) VALUES (?)', migration.version);
-        await db.exec('COMMIT');
-      } catch (error) {
-        await db.exec('ROLLBACK');
-        throw error;
-      }
+// Configuration
+sessionIdleTimeoutMs: 60_000,   // 60 seconds without heartbeat
+cleanupIntervalMs: 15_000,      // Check every 15 seconds
+
+// Cleanup logic
+private async cleanupIdleSessions() {
+  const now = Date.now();
+  for (const [sessionId, session] of this.sessions) {
+    const lastAccess = new Date(session.lastAccessAt).getTime();
+    if (now - lastAccess > this.sessionIdleTimeoutMs) {
+      await this.endSession(sessionId);
     }
   }
 }
 ```
 
-### 22.3 Health Checks
+### 12.3 Session State Storage
 
-```typescript
-const healthChecks: HealthCheck[] = [
-  { name: 'database', critical: true, check: checkDatabase },
-  { name: 'ffmpeg', critical: true, check: checkFFmpeg },
-  { name: 'disk_space', critical: true, check: checkDiskSpace },
-  { name: 'transcode_queue', critical: false, check: checkQueueDepth },
-];
+**In-memory** (`PlaybackSessionInfo`):
+- Session metadata
+- PlaybackPlan
+- FFmpeg process reference
+- Last access timestamp
 
-// Endpoints:
-// GET /health         - Simple up/down
-// GET /health/ready   - Ready to serve
-// GET /health/live    - Detailed health
+**On-disk** (`/tmp/mediaserver/transcode/{sessionId}/`):
+- master.m3u8
+- playlist.m3u8 (written by FFmpeg)
+- segment_00000.ts, segment_00001.ts, ...
+
+### 12.4 Seeking Past Transcoded Content
+
+When a user seeks to a position that hasn't been transcoded yet, the system handles it gracefully:
+
+**Client-side logic:**
 ```
+User initiates seek to position X
+      │
+      ├── If X <= transcodedTime + 30s
+      │   └── Local seek (hls.js handles it)
+      │
+      └── If X > transcodedTime + 30s
+          │
+          ├── Call server-side seek endpoint
+          ├── Server restarts FFmpeg at position X
+          ├── Server waits for first segment
+          └── Client reloads HLS source
+```
+
+**Server-side seek process:**
+1. Stop current FFmpeg process
+2. Create new epoch (discontinuity marker)
+3. Restart FFmpeg with `-ss {position}` (fast seek)
+4. Wait for first segment to be ready
+5. Return epoch info to client
+
+**API Endpoint:**
+```typescript
+// POST /api/trpc/playback.seek
+{
+  sessionId: string;
+  position: number;  // Target position in source file time
+}
+
+// Response
+{
+  success: boolean;
+  epochIndex: number;       // New epoch number
+  startPosition: number;    // Actual seek position
+  transcodedTime: number;   // How far new epoch has transcoded
+}
+```
+
+**Epoch handling:** Each seek creates a new epoch with a discontinuity marker in the HLS playlist. The discontinuity tells hls.js to reset its timing model. The new epoch's segments start at index 0, but represent the content from the seek position.
+
+**Client reload:** After server seek completes, the client calls `playerRef.current.reloadSource()` which:
+1. Stops current HLS load
+2. Reloads the playlist (fetches new epoch)
+3. Starts playback from beginning of new epoch (position 0 in playlist = seek position in source)
 
 ---
 
-## 23. API Versioning & Client Contract
+## 13. Audio Track & Subtitle Switching
 
-### 23.1 Version Strategy
+### 13.1 Audio Codec Decision Matrix
+
+| Source | Client AAC | Client AC3 | Action |
+|--------|------------|------------|--------|
+| AAC | ✅ | - | Passthrough |
+| AC3 | ❌ | ✅ | Passthrough |
+| AC3 | ❌ | ❌ | Transcode → AAC |
+| EAC3 | ❌ | ✅ | Passthrough |
+| TrueHD | ❌ | ✅ | Transcode → AC3 5.1 |
+| TrueHD | ❌ | ❌ | Transcode → AAC stereo |
+| DTS | ❌ | ✅ | Transcode → AC3 |
+| DTS | ❌ | ❌ | Transcode → AAC |
+
+### 13.2 Subtitle Handling
+
+| Format | Type | Render Method |
+|--------|------|---------------|
+| WebVTT/SRT | Text | Client-side |
+| ASS/SSA simple | Text | Convert to WebVTT |
+| ASS/SSA complex | Text | Burn into video |
+| PGS/VOBSUB | Image | Burn into video |
+
+---
+
+## 14. HDR Handling
+
+### 14.1 HDR Decision Flow
 
 ```typescript
-// URL-based versioning: /api/v1/media/{id}, /api/v2/media/{id}
-
-interface ServerCapabilitiesResponse {
-  serverVersion: string;
-  apiVersion: number;
-  supportedApiVersions: number[];
-  capabilities: {
-    transcoding: boolean;
-    hardwareAcceleration: boolean;
-    maxConcurrentStreams: number;
-    supportedVideoCodecs: string[];
-    supportedAudioCodecs: string[];
-    hdrSupport: string[];
-    trickplayFormats: string[];
-    supportsOfflineDownloads: boolean;
-    supportsPlaybackSpeed: boolean;
-    supportsAudioNormalization: boolean;
-  };
-  features: {
-    introSkipDetection: boolean;
-    multiVersionMedia: boolean;
-    watchTogether: boolean;
+function determineHDRHandling(media, client, manifest): PlaybackPlan['hdr'] {
+  const hdrFormat = detectHDRFormat(media);
+  
+  if (hdrFormat === 'sdr') {
+    return { sourceFormat: 'sdr', mode: 'passthrough' };
+  }
+  
+  // Client supports this HDR format?
+  if (clientSupportsHDR(client, hdrFormat)) {
+    return { sourceFormat: hdrFormat, mode: 'passthrough' };
+  }
+  
+  // Need to tonemap to SDR
+  return {
+    sourceFormat: hdrFormat,
+    mode: 'tonemap_sdr',
+    tonemapFilter: selectToneMapFilter(manifest),
   };
 }
 ```
 
-### 23.2 Breaking Change Policy
+### 14.2 Tone Mapping Filters
 
-| Change Type | Handling |
-|-------------|----------|
-| New optional field | Add to response, no version bump |
-| New required field | New API version |
-| Field removal | Deprecate first, remove in next major |
-| Behavior change | Document, consider feature flag |
+```bash
+# Software (zscale + tonemap)
+-vf "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
 
----
-
-## 24. Testing Strategy
-
-### 24.1 Unit Tests
-
-```typescript
-describe('FFmpegCommandBuilder', () => {
-  it('builds correct software command', () => {
-    const cmd = buildFFmpegCommand({ encoder: 'libx264' });
-    expect(cmd).toContain('-c:v libx264');
-  });
-  
-  it('includes deinterlace filter for interlaced content', () => {
-    const cmd = buildFFmpegCommand({ quirks: { isInterlaced: true } });
-    expect(cmd).toContain('yadif');
-  });
-});
-```
-
-### 24.2 Compatibility Matrix
-
-| Source | Client | Expected |
-|--------|--------|----------|
-| H.264 1080p | Safari iOS | Direct play |
-| HEVC 4K | Safari iOS | Direct play |
-| AV1 | Safari | Transcode to H.264 |
-| HDR10 | SDR client | Tone map |
-| DV Profile 8 | HDR10 client | Extract base layer |
-| DV Profile 7 | SDR client | Full transcode + tonemap |
-| Interlaced MPEG2 | Any | Deinterlace + transcode |
-| VFR screen recording | Any | CFR convert + transcode |
-| AVI container | Any | Remux to MP4 |
-
----
-
-## 25. Database Schema
-
-### 25.1 Core Tables
-
-```sql
-CREATE TABLE server_capabilities (
-  id TEXT PRIMARY KEY DEFAULT 'singleton',
-  cpu_model TEXT,
-  cpu_cores INTEGER,
-  cpu_threads INTEGER,
-  gpu_vendor TEXT,
-  gpu_model TEXT,
-  encoders TEXT,
-  server_class TEXT,
-  max_concurrent_transcodes INTEGER,
-  detected_at TEXT
-);
-
-CREATE TABLE media_metadata (
-  id TEXT PRIMARY KEY,
-  file_path TEXT NOT NULL UNIQUE,
-  fingerprint TEXT NOT NULL,
-  probe_data TEXT NOT NULL,
-  duration_seconds REAL,
-  video_codec TEXT,
-  audio_codec TEXT,
-  resolution TEXT,
-  hdr_format TEXT,
-  dolby_vision_profile INTEGER,
-  is_interlaced BOOLEAN DEFAULT FALSE,
-  is_variable_frame_rate BOOLEAN DEFAULT FALSE,
-  content_quirks TEXT,
-  has_chapters BOOLEAN DEFAULT FALSE,
-  trickplay_status TEXT DEFAULT 'pending',
-  scan_status TEXT DEFAULT 'pending',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE transcode_cache (
-  id TEXT PRIMARY KEY,
-  media_id TEXT NOT NULL,
-  cache_key TEXT NOT NULL UNIQUE,
-  profile_id TEXT NOT NULL,
-  audio_track_index INTEGER DEFAULT 0,
-  subtitle_mode TEXT DEFAULT 'none',
-  hdr_mode TEXT DEFAULT 'passthrough',
-  quirks_applied TEXT,
-  playback_speed REAL DEFAULT 1.0,
-  pipeline_version INTEGER NOT NULL,
-  file_path TEXT NOT NULL,
-  status TEXT DEFAULT 'complete',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  last_accessed_at TEXT
-);
-
-CREATE TABLE user_preferences (
-  user_id TEXT PRIMARY KEY,
-  preferred_audio_languages TEXT,
-  preferred_subtitle_languages TEXT,
-  subtitle_mode TEXT DEFAULT 'auto',
-  default_playback_speed REAL DEFAULT 1.0,
-  audio_normalization TEXT DEFAULT 'off',
-  intro_skip TEXT DEFAULT 'prompt',
-  credits_skip TEXT DEFAULT 'prompt',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE watch_history (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  media_id TEXT NOT NULL,
-  position_seconds REAL NOT NULL,
-  duration_seconds REAL NOT NULL,
-  progress_percent REAL NOT NULL,
-  completed BOOLEAN DEFAULT FALSE,
-  watched_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE skip_markers (
-  id TEXT PRIMARY KEY,
-  media_id TEXT NOT NULL,
-  marker_type TEXT NOT NULL,
-  start_time REAL NOT NULL,
-  end_time REAL NOT NULL,
-  source TEXT DEFAULT 'manual',
-  confidence REAL DEFAULT 1.0
-);
-
-CREATE TABLE media_health (
-  media_id TEXT PRIMARY KEY,
-  failure_count INTEGER DEFAULT 0,
-  last_failure_at TEXT,
-  failure_reasons TEXT,
-  status TEXT DEFAULT 'healthy'
-);
-
-CREATE TABLE schema_version (
-  version INTEGER PRIMARY KEY,
-  name TEXT,
-  applied_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
+# NVIDIA CUDA
+-vf "tonemap_cuda=tonemap=hable:desat=0:format=yuv420p"
 ```
 
 ---
 
-## 26. FFmpeg Command Reference
+## 15. Content Quirks Handling
 
-### 26.1 Universal Fallback
+### 15.1 Interlaced Content
+
+Detection: `field_order` in ffprobe output
+
+```bash
+# Deinterlace with yadif
+ffmpeg -i interlaced.mkv -vf "yadif=0:0:0" output.mp4
+
+# Hardware (CUDA)
+ffmpeg -i interlaced.mkv -vf "yadif_cuda" output.mp4
+```
+
+### 15.2 Variable Frame Rate (VFR)
+
+Detection: Multiple `avg_frame_rate` values, or container indicates VFR
+
+```bash
+# Convert to constant frame rate
+ffmpeg -i vfr.mp4 -vsync cfr -r 30 output.mp4
+```
+
+### 15.3 Legacy Containers
+
+| Container | Issue | Solution |
+|-----------|-------|----------|
+| AVI | No streaming | Remux to MP4 |
+| WMV/ASF | DRM, poor seek | Remux or transcode |
+| FLV | Flash-era | Remux to MP4 |
+
+---
+
+## 16. Trickplay & Seek Preview
+
+### 16.1 Thumbnail Generation
 
 ```bash
 ffmpeg -i input.mkv \
-  -c:v libx264 -preset fast -crf 23 -profile:v baseline -level 3.0 \
+  -vf "fps=1/10,scale=320:-1" \
+  -q:v 5 \
+  thumbnails/thumb_%04d.jpg
+```
+
+### 16.2 Sprite Generation
+
+Combine thumbnails into sprite sheets for efficient loading:
+
+```typescript
+interface TrickplayConfig {
+  interval: 10,           // seconds between thumbnails
+  width: 320,             // thumbnail width
+  spriteColumns: 5,       // thumbnails per row
+  spriteRows: 5,          // rows per sprite
+  quality: 75,            // JPEG quality
+}
+```
+
+---
+
+## 17. User Experience Features
+
+### 17.1 Resume Position
+
+Resume time is **always stored in source-file time**, regardless of playback speed.
+
+```typescript
+interface WatchProgress {
+  userId: string;
+  mediaId: string;
+  position: number;       // Source time in seconds
+  duration: number;       // Total duration
+  percentage: number;     // Completion percentage
+  updatedAt: string;
+}
+```
+
+### 17.2 Duration Handling
+
+The server returns the actual duration from media probe in the session creation response. This is used as the authoritative duration because hls.js may report `Infinity` for EVENT playlists.
+
+```typescript
+// Server
+return {
+  sessionId,
+  duration: probe.format.duration,  // From ffprobe
+  // ...
+};
+
+// Client
+const knownDurationRef = useRef<number | null>(null);
+useEffect(() => {
+  if (session?.duration && session.duration > 0) {
+    knownDurationRef.current = session.duration;
+    setDuration(session.duration);
+  }
+}, [session]);
+```
+
+### 17.3 Premature "Ended" Event Handling
+
+HLS.js may fire the `ended` event when it runs out of buffered segments during live transcoding. The player checks if we're actually near the end:
+
+```typescript
+const handleEnded = () => {
+  if (knownDuration && currentTime >= knownDuration - 10) {
+    // Actually ended
+    emitStateChange({ status: 'ended' });
+  } else {
+    // HLS.js ran out of segments, just buffering
+    emitStateChange({ status: 'buffering' });
+  }
+};
+```
+
+---
+
+## 18. Error Recovery & Resilience
+
+### 18.1 Timeout Policy
+
+| Timeout | Value | Action |
+|---------|-------|--------|
+| First segment deadline | 45s | Restart with lower quality |
+| No-progress timeout | 60s | Kill FFmpeg, retry |
+| Session idle timeout | 60s | End session, cleanup |
+
+### 18.2 HLS.js Error Recovery
+
+```typescript
+hls.on(Hls.Events.ERROR, (event, data) => {
+  if (data.fatal) {
+    switch (data.type) {
+      case Hls.ErrorTypes.NETWORK_ERROR:
+        if (retryCount < 3) {
+          hls.startLoad();  // Retry
+        }
+        break;
+      case Hls.ErrorTypes.MEDIA_ERROR:
+        if (retryCount < 3) {
+          hls.recoverMediaError();
+        }
+        break;
+    }
+  }
+});
+```
+
+---
+
+## 19. Caching Strategy
+
+### 19.1 Cache Structure
+
+```
+/tmp/mediaserver/transcode/
+├── {sessionId}/
+│   ├── master.m3u8
+│   ├── playlist.m3u8
+│   └── segment_00000.ts ...
+```
+
+### 19.2 Cleanup on Session End
+
+When a session ends:
+1. Kill FFmpeg process
+2. Delete session directory
+3. Clear from memory
+
+---
+
+## 20. Security Considerations
+
+### 20.1 Authentication
+
+All stream routes require JWT authentication:
+
+```typescript
+streamRouter.use('/*', async (c, next) => {
+  // Try Authorization header first
+  let token = c.req.header('Authorization')?.replace('Bearer ', '');
+  
+  // Fall back to query param (for HLS segments)
+  if (!token) {
+    token = c.req.query('token');
+  }
+  
+  // Verify token
+  const payload = verifyAccessToken(token, JWT_SECRET);
+  c.set('userId', payload.sub);
+  c.set('userRole', payload.role);
+  
+  await next();
+});
+```
+
+### 20.2 Authorization
+
+Session ownership is validated:
+- Only session owner can access session
+- Admin can access any session
+- Session info endpoint checks ownership
+
+---
+
+## 21. API Reference
+
+### 21.1 Create Session
+
+```
+POST /api/stream/session
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "mediaType": "movie" | "episode",
+  "mediaId": "<uuid>",
+  "startPosition": 0,
+  "audioTrackIndex": 0,
+  "subtitleTrackIndex": null,
+  "burnSubtitles": false
+}
+
+Response:
+{
+  "sessionId": "<nanoid>",
+  "masterPlaylist": "/api/stream/<sessionId>/master.m3u8",
+  "directPlay": false,
+  "startPosition": 0,
+  "duration": 7200.5,
+  "plan": {
+    "mode": "transcode_hls",
+    "transport": "hls",
+    "container": "hls_ts",
+    "video": { "action": "encode", "codec": "h264" },
+    "audio": { "action": "copy", "codec": "aac", "channels": 2 }
+  }
+}
+```
+
+### 21.2 Get Master Playlist
+
+```
+GET /api/stream/<sessionId>/master.m3u8
+Authorization: Bearer <token>
+
+Response: application/vnd.apple.mpegurl
+#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"
+playlist.m3u8
+```
+
+### 21.3 Get Media Playlist
+
+```
+GET /api/stream/<sessionId>/playlist.m3u8
+Authorization: Bearer <token>
+
+Response: application/vnd.apple.mpegurl
+#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:4
+#EXT-X-MEDIA-SEQUENCE:0
+#EXT-X-PLAYLIST-TYPE:EVENT
+
+#EXTINF:4.000000,
+segment_00000.ts
+#EXTINF:4.000000,
+segment_00001.ts
+...
+```
+
+### 21.4 Get Segment
+
+```
+GET /api/stream/<sessionId>/segment_00000.ts
+Authorization: Bearer <token>
+
+Response: video/MP2T (binary)
+```
+
+### 21.5 Session Heartbeat
+
+```
+POST /api/stream/<sessionId>/heartbeat
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "position": 125.5,
+  "isPlaying": true
+}
+
+Response:
+{
+  "success": true,
+  "sessionId": "<sessionId>",
+  "position": 125.5,
+  "isPlaying": true
+}
+```
+
+### 21.6 End Session
+
+```
+DELETE /api/stream/<sessionId>
+Authorization: Bearer <token>
+
+Response:
+{
+  "success": true,
+  "sessionId": "<sessionId>"
+}
+```
+
+---
+
+## 22. Database Schema
+
+### 22.1 Playback Sessions Table
+
+```sql
+CREATE TABLE playback_sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  media_id TEXT NOT NULL,
+  media_type TEXT NOT NULL,  -- 'movie' | 'episode'
+  playback_plan TEXT NOT NULL,  -- JSON PlaybackPlan
+  
+  current_position REAL DEFAULT 0,
+  status TEXT DEFAULT 'active',
+  
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_heartbeat TEXT,
+  ended_at TEXT
+);
+```
+
+### 22.2 Watch Progress Table
+
+```sql
+CREATE TABLE watch_progress (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  media_id TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  
+  position REAL NOT NULL,
+  duration REAL NOT NULL,
+  percentage REAL NOT NULL,
+  
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  
+  UNIQUE(user_id, media_id, media_type)
+);
+```
+
+---
+
+## 23. FFmpeg Command Reference
+
+### 23.1 Universal Fallback (H.264 + AAC)
+
+```bash
+ffmpeg -i input.mkv \
+  -c:v libx264 -preset fast -crf 23 -profile:v high -level 4.0 \
   -c:a aac -b:a 128k -ac 2 \
-  -f hls -hls_time 4 -hls_list_size 0 \
+  -f hls -hls_time 4 -hls_list_size 0 -hls_playlist_type event \
+  -muxdelay 0 -muxpreload 0 -avoid_negative_ts make_zero -start_at_zero \
   playlist.m3u8
 ```
 
-### 26.2 NVIDIA NVENC
+### 23.2 Video Copy + Audio Transcode
+
+```bash
+ffmpeg -i input.mkv \
+  -c:v copy \
+  -c:a aac -b:a 256k -ac 2 \
+  -f hls -hls_time 4 -hls_list_size 0 -hls_playlist_type event \
+  playlist.m3u8
+```
+
+### 23.3 NVIDIA NVENC (Hardware)
 
 ```bash
 ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i input.mkv \
@@ -1627,138 +1242,170 @@ ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i input.mkv \
   -f hls -hls_time 4 playlist.m3u8
 ```
 
-### 26.3 HDR to SDR Tone Mapping
+### 23.4 Apple VideoToolbox (macOS)
 
 ```bash
-ffmpeg -i hdr.mkv \
-  -vf "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" \
-  -c:v libx264 -crf 18 -c:a aac output.mp4
+ffmpeg -i input.mkv \
+  -c:v h264_videotoolbox -b:v 8M \
+  -c:a aac -b:a 256k \
+  -f hls -hls_time 4 playlist.m3u8
 ```
 
-### 26.4 Deinterlacing
+### 23.5 HDR to SDR Tone Mapping
+
+```bash
+# Software
+ffmpeg -i hdr.mkv \
+  -vf "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p" \
+  -c:v libx264 -crf 18 output.mp4
+
+# NVIDIA CUDA
+ffmpeg -hwaccel cuda -i hdr.mkv \
+  -vf "tonemap_cuda=tonemap=hable:desat=0:format=yuv420p" \
+  -c:v h264_nvenc output.mp4
+```
+
+### 23.6 Deinterlacing
 
 ```bash
 ffmpeg -i interlaced.mkv -vf "yadif=0:0:0" -c:v libx264 output.mp4
 ```
 
-### 26.5 VFR to CFR
+### 23.7 Media Probing
 
 ```bash
-ffmpeg -i vfr.mp4 -vsync cfr -r 30 -c:v libx264 output.mp4
-```
-
-### 26.6 Playback Speed
-
-```bash
-ffmpeg -i input.mkv -vf "setpts=0.667*PTS" -af "atempo=1.5" output.mp4
-```
-
-### 26.7 Audio Normalization
-
-```bash
-ffmpeg -i input.mkv -af "loudnorm=I=-16:TP=-1.5:LRA=11" -c:v copy output.mp4
-```
-
-### 26.8 Subtitle Burn-In
-
-```bash
-ffmpeg -i input.mkv -vf "subtitles='input.mkv':si=0" -c:v libx264 output.mp4
-```
-
-### 26.9 Trickplay Thumbnails
-
-```bash
-ffmpeg -i input.mkv -vf "fps=1/10,scale=320:-1" -q:v 5 thumb_%04d.jpg
+ffprobe -v quiet -print_format json -show_format -show_streams input.mkv
 ```
 
 ---
 
-## 27. Implementation Phases
+## 24. Troubleshooting
 
-| Phase | Focus | Duration |
-|-------|-------|----------|
-| 1 | Foundation | Week 1-2 |
-| 2 | Basic Transcoding | Week 3-4 |
-| 3 | Hardware Acceleration | Week 5-6 |
-| 4 | Content Quirks | Week 7-8 |
-| 5 | Multi-Quality ABR | Week 9-10 |
-| 6 | Live Transcoding | Week 11-12 |
-| 7 | Track Switching | Week 13-14 |
-| 8 | Trickplay | Week 15-16 |
-| 9 | UX Features | Week 17-18 |
-| 10 | Caching & Remote | Week 19-20 |
-| 11 | Multi-Version | Week 21-22 |
-| 12 | HDR & DV | Week 23-24 |
-| 13 | Offline Downloads | Week 25-26 |
-| 14 | Hardening | Week 27-28 |
-| 15 | Observability | Week 29-30 |
-| 16 | Polish & Launch | Week 31-32 |
+### 24.1 Video Player Stuck on Spinner
+
+1. **Check session creation**: Network tab should show successful POST to `/api/stream/session`
+2. **Check master.m3u8**: Should return valid HLS playlist
+3. **Check playlist.m3u8**: Should contain `#EXTINF` entries
+4. **Check FFmpeg**: Server logs should show "Starting FFmpeg" and segment generation
+5. **Check auth**: All HLS requests need Authorization header
+
+**Resume stuck specifically:** If the video shows the correct resume position but spinner persists:
+- For transcoded content, `startTime` prop to video element must be `0` (not the resume position)
+- FFmpeg already starts at the resume position via `-ss`
+- The `epochOffset` handles translating display time
+- Check that `WebVideoPlayer` receives `startTime={session?.directPlay ? startPosition : 0}`
+
+### 24.2 Playback Erratic/Jumping
+
+1. **Check hls.js config**: Ensure `liveSyncDuration` and `liveMaxLatencyDuration` are set high
+2. **Check duration**: Player should use server-provided duration, not hls.js duration
+3. **Check playlist type**: Should be EVENT (not VOD) for live transcoding
+
+### 24.3 Duration Shows Infinity
+
+This is normal for EVENT playlists. The player should use the duration from the session creation response, not from hls.js.
+
+### 24.4 Multiple FFmpeg Processes / FFmpeg Leak
+
+**Symptom**: `ps aux | grep ffmpeg` shows many processes for the same session, using excessive CPU.
+
+**Causes**:
+1. **Seek race condition**: Multiple rapid seeks spawn FFmpeg before previous one is killed
+2. **Exit handler restart**: FFmpeg killed during seek triggers unwanted restart
+
+**Fixes applied**:
+- Seek mutex (`seekInProgress` promise) prevents concurrent seek operations
+- `handleFFmpegExit` checks `ffmpegState.status === 'stopping'` to skip restart for intentional stops
+- Session sets `status = 'ending'` BEFORE calling `stopFFmpeg()` to prevent race
+
+**Cleanup**:
+```bash
+# Kill stuck FFmpeg processes
+pkill -9 -f "ffmpeg.*transcode"
+
+# Clean transcode directory
+rm -rf /tmp/mediaserver/transcode/*
+```
+
+### 24.5 First Segment Timeout
+
+Increase `firstSegmentTimeoutMs` in session config. 4K transcoding on slower hardware can take 45+ seconds for first segment.
+
+### 24.6 HLS.js Config Validation Error
+
+Error: `liveMaxLatencyDuration must be greater than liveSyncDuration`
+
+Fix: Ensure `liveMaxLatencyDuration > liveSyncDuration` in hls-config.ts.
+
+### 24.7 Quality Label Incorrect for Widescreen
+
+The quality labeling uses tier-based height thresholds to handle widescreen content (e.g., 1920x804 shows as "1080p" not "804p").
+
+### 24.8 HLS.js `bufferSeekOverHole` Warning
+
+**Error**: `{ type: "mediaError", details: "bufferSeekOverHole", fatal: false }`
+
+**This is normal and non-fatal.** HLS.js detected a small timestamp gap (typically 0-0.1s) at the start of transcoded content and automatically seeked over it. This happens because:
+- FFmpeg seeks to the nearest keyframe (not exact position)
+- First segment timestamps may not start exactly at 0
+
+The `maxBufferHole: 0.5` config setting allows hls.js to automatically handle gaps up to 0.5 seconds.
+
+### 24.9 Seek Sometimes Works, Sometimes Doesn't
+
+**Cause**: Client wasn't tracking `transcodedTime` properly, leading to wrong local vs server-side seek decisions.
+
+**Fix**: 
+- Heartbeat now returns `transcodedTime` from server
+- Client updates `transcodedTime` state on each heartbeat
+- `transcodedTime` initialized to `startPosition` on session creation
+- Seek logic compares target vs `transcodedTime + 30s` buffer to decide
 
 ---
 
-## 28. Future Scope
+## 25. Future Scope
 
-### 28.1 Watch Together (Sync Playback)
+### 25.1 Planned Features
 
-- WebSocket for real-time sync
-- Latency compensation
-- Buffer synchronization
-- Chat/reactions overlay
+- **Multi-variant HLS**: Multiple quality levels in master playlist
+- **ABR (Adaptive Bitrate)**: Client-driven quality switching
+- **Seek optimization**: Pre-transcode around seek points
+- **Session persistence**: Survive server restart
+- **Cache sharing**: Reuse transcoded segments across users
 
-### 28.2 External Player Support
+### 25.2 Low-Latency HLS
 
-| Protocol | Use Case |
-|----------|----------|
-| DLNA/UPnP | Smart TVs, receivers |
-| Chromecast | Google ecosystem |
-| AirPlay | Apple ecosystem |
-| External player intent | VLC, mpv |
+- Partial segments
+- Preload hints
+- Blocking playlist reload
 
-### 28.3 Multi-Server Load Balancing
+### 25.3 External Players
 
-- Shared database or distributed state
-- Cache sharing/replication
-- Session migration on failover
-
-### 28.4 AI-Powered Features
-
-- Audio fingerprinting for intro detection
-- Automatic chapter generation
-- Content-based recommendations
-- Smart thumbnail selection
-
----
-
-## Summary
-
-This pipeline is designed to:
-
-1. **Adapt to any server** - Raspberry Pi to enterprise
-2. **Play on any device** - H.264/AAC fallback guarantees compatibility
-3. **Handle any content** - Interlaced, VFR, HDR, Dolby Vision, legacy containers
-4. **Start instantly** - 3-5 second startup
-5. **Recover gracefully** - Handle errors and resource constraints
-6. **Scale efficiently** - Caching, sharing, pre-transcoding
-7. **Optimize for remote** - Bandwidth-aware quality
-8. **Provide rich UX** - Trickplay, speed control, intro skip, language preferences
-
-**Key insight: The best playback experience is invisible.** Users press play, it plays.
+- DLNA/UPnP
+- Chromecast
+- AirPlay
 
 ---
 
 ## Changelog
 
-### Version 3.0 - Comprehensive Update
+### Version 5.0 - Simplified Architecture
 
 | Section | Change |
 |---------|--------|
-| §6 | **NEW** - Media Analysis & Metadata (ffprobe workflow, chapter extraction, scan pipeline) |
-| §11.2 | **EXPANDED** - Dolby Vision profile handling (P5/P7/P8 differences) |
-| §12 | **NEW** - Content Quirks Handling (interlacing, VFR, telecine, legacy containers, aspect ratio) |
-| §13 | **NEW** - Trickplay & Seek Preview (WebVTT, BIF, sprite generation) |
-| §14 | **NEW** - User Experience Features (playback speed, audio normalization, intro skip, language prefs, watch history) |
-| §20 | **NEW** - Multi-Version Media Handling |
-| §22 | **NEW** - Operational Concerns (graceful shutdown, migrations, backups, health checks) |
-| §23 | **NEW** - API Versioning & Client Contract |
-| §28 | **NEW** - Future Scope (watch together, external players, multi-server, AI features) |
-| All | Updated TypeScript interfaces and database schema to support new features |
+| §2 | **NEW** - Architecture overview with simplified disk-based approach |
+| §6.2 | **ADDED** - Quality label assignment with tier thresholds |
+| §11 | **REWRITTEN** - Complete HLS implementation details |
+| §12 | **NEW** - Session management with automatic cleanup |
+| §17 | **EXPANDED** - Duration handling, premature ended event |
+| §21 | **NEW** - Complete API reference |
+| §24 | **NEW** - Troubleshooting guide |
+
+### Version 4.0 - Production Hardening
+
+- Added audio-only transcode as first-class tier
+- FFmpeg Capability Manifest
+- PlaybackPlan as single source of truth
+- HLS correctness contracts
+- Content quirks handling
+- Cache GC and disk pressure controls

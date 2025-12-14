@@ -67,10 +67,35 @@ export {
   useCreateSession,
   useSessionHeartbeat,
   useEndSession,
+  useSessionSeek,
+  useTranscodedProgress,
   useContinueWatching,
   useRecentlyWatched,
   useActiveSessions,
 } from './usePlayback.js';
+
+// Playback session hook (comprehensive session lifecycle management)
+export { usePlaybackSession } from './usePlaybackSession.js';
+export type {
+  SessionStatus,
+  CreateSessionResponse,
+  SeekResult,
+  UsePlaybackSessionOptions,
+  UsePlaybackSessionReturn,
+} from './usePlaybackSession.js';
+
+// Player controls hook (state management for video player)
+export { usePlayerControls } from './usePlayerControls.js';
+export type {
+  PlayerStatus,
+  BufferedRange,
+  QualityLevel,
+  PlayerError,
+  PlayerState,
+  UsePlayerControlsOptions,
+  PlayerHandle,
+  UsePlayerControlsReturn,
+} from './usePlayerControls.js';
 
 // Search hooks
 export { useSearch, useSearchSuggestions, useTrending } from './useSearch.js';

@@ -493,7 +493,7 @@ export default function EpisodeDetailPage() {
 
                 {/* Action buttons - white Play, gray Refresh Metadata */}
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-                  <Link href={`/watch/episode/${episode.id}` as Href} asChild>
+                  <Link href={`/watch/tv/${episode.id}` as Href} asChild>
                     <Pressable
                       style={{
                         flexDirection: 'row',
@@ -513,7 +513,7 @@ export default function EpisodeDetailPage() {
                   </Link>
 
                   {hasProgress && !isWatched && (
-                    <Link href={`/watch/episode/${episode.id}?start=0` as Href} asChild>
+                    <Link href={`/watch/tv/${episode.id}?start=0` as Href} asChild>
                       <Pressable
                         style={{
                           flexDirection: 'row',

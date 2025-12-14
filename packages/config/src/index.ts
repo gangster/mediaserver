@@ -55,6 +55,7 @@ export {
   createSessionInputSchema,
   updateWatchProgressInputSchema,
   sessionHeartbeatInputSchema,
+  sessionSeekInputSchema,
   // Provider
   metadataProviderSchema,
   ratingSourceSchema,

@@ -44,6 +44,25 @@ export function useEndSession() {
 }
 
 /**
+ * Hook for seeking in a playback session.
+ * This triggers a server-side seek which restarts FFmpeg at the new position.
+ */
+export function useSessionSeek() {
+  return trpc.playback.seek.useMutation();
+}
+
+/**
+ * Hook for getting the transcoded progress of a session.
+ * Returns how far FFmpeg has transcoded (in source file time).
+ */
+export function useTranscodedProgress(sessionId: string | undefined, enabled = true) {
+  return trpc.playback.getTranscodedProgress.useQuery(
+    { sessionId: sessionId ?? '' },
+    { enabled: enabled && !!sessionId }
+  );
+}
+
+/**
  * Hook for continue watching items.
  */
 export function useContinueWatching(limit = 10) {

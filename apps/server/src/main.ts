@@ -17,9 +17,12 @@ import { createContext } from './context.js';
 import { healthRouter } from './routes/health.js';
 import { streamRouter } from './routes/stream.js';
 import { imagesRouter } from './routes/images.js';
+import { trickplayRouter } from './routes/trickplay.js';
 import { createLogger } from './lib/logger.js';
 import { initializeMetadataManager } from './services/metadata.js';
 import { initializeJobQueue, shutdownJobQueue } from './jobs/index.js';
+import { initStreamingService, shutdownStreamingService } from './services/streaming-service.js';
+import { detectServerCapabilities } from './services/server-capabilities.js';
 
 // Load environment variables
 const env = loadEnv();
@@ -53,6 +56,27 @@ const db = createDatabaseFromEnv();
 // Initialize metadata manager (loads configs from DB)
 await initializeMetadataManager({}, env.TMDB_API_KEY, db);
 log.info('🎬 Metadata manager initialized');
+
+// Detect server capabilities and initialize streaming service
+try {
+  const serverCaps = await detectServerCapabilities();
+  log.info(
+    { 
+      serverClass: serverCaps.serverClass,
+      maxTranscodes: serverCaps.maxConcurrentTranscodes,
+      cpu: `${serverCaps.cpu.vendor} ${serverCaps.cpu.cores} cores`,
+      gpu: `${serverCaps.gpu.vendor} ${serverCaps.gpu.model}`
+    },
+    '🖥️  Server capabilities detected'
+  );
+  
+  await initStreamingService(db, serverCaps, {
+    cacheDir: '/tmp/mediaserver/transcode',
+  });
+  log.info('📡 Streaming service initialized');
+} catch (error) {
+  log.error({ error }, '⚠️  Failed to initialize streaming service - streaming disabled');
+}
 
 // Initialize job queue with Redis/Valkey
 if (env.REDIS_URL) {
@@ -95,6 +119,9 @@ app.route('/api/stream', streamRouter);
 // Image proxy routes
 app.route('/api/images', imagesRouter);
 
+// Trickplay routes (thumbnail sprites for seek preview)
+app.route('/api/trickplay', trickplayRouter);
+
 // tRPC API
 app.use(
   '/api/*',
@@ -129,6 +156,7 @@ log.info(`🚀 Server starting on http://${host}:${port}`);
 log.info(`📡 tRPC API available at http://${host}:${port}/api`);
 log.info(`🎬 Streaming API available at http://${host}:${port}/api/stream`);
 log.info(`🖼️  Images API available at http://${host}:${port}/api/images`);
+log.info(`🎞️  Trickplay API available at http://${host}:${port}/api/trickplay`);
 log.info(`💚 Health check at http://${host}:${port}/health`);
 
 const server = serve({
@@ -140,6 +168,13 @@ const server = serve({
 // Graceful shutdown
 async function shutdown() {
   log.info('Shutting down...');
+  
+  // Shutdown streaming service
+  try {
+    await shutdownStreamingService();
+  } catch {
+    // Ignore errors during shutdown
+  }
   
   // Shutdown job queue
   try {

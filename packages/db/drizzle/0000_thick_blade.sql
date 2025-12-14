@@ -8,6 +8,29 @@ CREATE TABLE `analytics_events` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
+CREATE TABLE `audio_tracks` (
+	`id` text PRIMARY KEY NOT NULL,
+	`media_type` text NOT NULL,
+	`media_id` text NOT NULL,
+	`stream_index` integer NOT NULL,
+	`codec` text NOT NULL,
+	`codec_long_name` text,
+	`language` text,
+	`language_name` text,
+	`title` text,
+	`channels` integer,
+	`channel_layout` text,
+	`sample_rate` integer,
+	`bit_rate` integer,
+	`bits_per_sample` integer,
+	`is_default` integer DEFAULT false,
+	`is_original` integer DEFAULT false,
+	`is_commentary` integer DEFAULT false,
+	`is_descriptive` integer DEFAULT false,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `audit_logs` (
 	`id` text PRIMARY KEY NOT NULL,
 	`action` text NOT NULL,
@@ -135,6 +158,9 @@ CREATE TABLE `episodes` (
 	`direct_playable` integer DEFAULT false,
 	`needs_transcode` integer DEFAULT false,
 	`subtitle_paths` text,
+	`intro_start` integer,
+	`intro_end` integer,
+	`credits_start` integer,
 	`added_at` text DEFAULT (datetime('now')) NOT NULL,
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`show_id`) REFERENCES `tv_shows`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -177,6 +203,22 @@ CREATE TABLE `job_logs` (
 	FOREIGN KEY (`job_id`) REFERENCES `background_jobs`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE TABLE `language_rules` (
+	`id` text PRIMARY KEY NOT NULL,
+	`user_id` text NOT NULL,
+	`name` text NOT NULL,
+	`priority` integer DEFAULT 100 NOT NULL,
+	`is_built_in` integer DEFAULT false NOT NULL,
+	`enabled` integer DEFAULT true NOT NULL,
+	`conditions` text NOT NULL,
+	`audio_languages` text NOT NULL,
+	`subtitle_languages` text NOT NULL,
+	`subtitle_mode` text,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
 CREATE TABLE `libraries` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
@@ -202,6 +244,18 @@ CREATE TABLE `library_permissions` (
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`library_id`) REFERENCES `libraries`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`granted_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE TABLE `media_language_overrides` (
+	`user_id` text NOT NULL,
+	`media_type` text NOT NULL,
+	`media_id` text NOT NULL,
+	`audio_languages` text,
+	`subtitle_languages` text,
+	`subtitle_mode` text,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	PRIMARY KEY(`user_id`, `media_type`, `media_id`),
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `media_ratings` (
@@ -270,6 +324,8 @@ CREATE TABLE `movies` (
 	`poster_blurhash` text,
 	`backdrop_blurhash` text,
 	`genres` text,
+	`original_language` text,
+	`origin_country` text,
 	`duration` integer,
 	`video_codec` text,
 	`audio_codec` text,
@@ -279,6 +335,7 @@ CREATE TABLE `movies` (
 	`needs_transcode` integer DEFAULT false,
 	`subtitle_paths` text,
 	`match_status` text DEFAULT 'pending' NOT NULL,
+	`credits_start` integer,
 	`added_at` text DEFAULT (datetime('now')) NOT NULL,
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
 	FOREIGN KEY (`library_id`) REFERENCES `libraries`(`id`) ON UPDATE no action ON DELETE cascade
@@ -307,6 +364,33 @@ CREATE TABLE `people` (
 	`known_for_department` text,
 	`created_at` text DEFAULT (datetime('now')) NOT NULL,
 	`updated_at` text DEFAULT (datetime('now')) NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `playback_preferences` (
+	`user_id` text PRIMARY KEY NOT NULL,
+	`audio_languages` text DEFAULT '["eng"]' NOT NULL,
+	`subtitle_languages` text DEFAULT '["eng"]' NOT NULL,
+	`subtitle_mode` text DEFAULT 'auto' NOT NULL,
+	`always_show_forced` integer DEFAULT true NOT NULL,
+	`prefer_sdh` integer DEFAULT false NOT NULL,
+	`prefer_original_audio` integer DEFAULT false NOT NULL,
+	`audio_quality` text DEFAULT 'highest' NOT NULL,
+	`remember_within_session` integer DEFAULT true NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL,
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE TABLE `playback_session_state` (
+	`user_id` text NOT NULL,
+	`show_id` text,
+	`last_audio_language` text,
+	`last_subtitle_language` text,
+	`was_explicit_change` integer DEFAULT false NOT NULL,
+	`last_activity_at` text DEFAULT (datetime('now')) NOT NULL,
+	`expires_at` text NOT NULL,
+	PRIMARY KEY(`user_id`, `show_id`),
+	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`show_id`) REFERENCES `tv_shows`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE TABLE `playback_sessions` (
@@ -523,6 +607,27 @@ CREATE TABLE `show_genres` (
 	FOREIGN KEY (`genre_id`) REFERENCES `genres`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE TABLE `subtitle_tracks` (
+	`id` text PRIMARY KEY NOT NULL,
+	`media_type` text NOT NULL,
+	`media_id` text NOT NULL,
+	`source` text NOT NULL,
+	`stream_index` integer,
+	`file_path` text,
+	`file_name` text,
+	`format` text NOT NULL,
+	`language` text,
+	`language_name` text,
+	`title` text,
+	`is_default` integer DEFAULT false,
+	`is_forced` integer DEFAULT false,
+	`is_sdh` integer DEFAULT false,
+	`is_cc` integer DEFAULT false,
+	`codec_long_name` text,
+	`created_at` text DEFAULT (datetime('now')) NOT NULL,
+	`updated_at` text DEFAULT (datetime('now')) NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE `system_provider_defaults` (
 	`id` text PRIMARY KEY DEFAULT 'default' NOT NULL,
 	`primary_provider` text DEFAULT 'tmdb',
@@ -590,6 +695,8 @@ CREATE TABLE `tv_shows` (
 	`poster_blurhash` text,
 	`backdrop_blurhash` text,
 	`genres` text,
+	`original_language` text,
+	`origin_country` text,
 	`season_count` integer DEFAULT 0 NOT NULL,
 	`episode_count` integer DEFAULT 0 NOT NULL,
 	`match_status` text DEFAULT 'pending' NOT NULL,
@@ -649,6 +756,7 @@ CREATE TABLE `watch_progress` (
 	`user_id` text NOT NULL,
 	`media_type` text NOT NULL,
 	`media_id` text NOT NULL,
+	`preferred_version_id` text,
 	`position` integer DEFAULT 0 NOT NULL,
 	`duration` integer DEFAULT 0 NOT NULL,
 	`percentage` real DEFAULT 0 NOT NULL,

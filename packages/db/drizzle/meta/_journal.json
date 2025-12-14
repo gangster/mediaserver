@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1765588890965,
-      "tag": "0000_bored_shinko_yamashiro",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1765589580467,
-      "tag": "0001_fat_edwin_jarvis",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1765598540733,
-      "tag": "0002_burly_praxagora",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1765684800000,
-      "tag": "0003_unified_language_preferences",
+      "when": 1765648497547,
+      "tag": "0000_thick_blade",
       "breakpoints": true
     }
   ]

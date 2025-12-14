@@ -596,7 +596,8 @@ export interface TranscodeSessionState {
   playbackPlan: PlaybackPlan;
   currentEpoch: EpochState;
   currentPositionSeconds: number;
-  status: 'active' | 'paused' | 'ended' | 'error';
+  /** 'ending' is a transitional state while shutting down FFmpeg to prevent restart attempts */
+  status: 'active' | 'paused' | 'ending' | 'ended' | 'error';
   startedAt: ISODateString;
   lastActivityAt: ISODateString;
   endedAt?: ISODateString;

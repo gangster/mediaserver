@@ -4,14 +4,17 @@
 
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
-import { router, protectedProcedure } from './trpc.js';
+import { router, protectedProcedure, adminProcedure } from './trpc.js';
 import {
   createSessionInputSchema,
   updateWatchProgressInputSchema,
   sessionHeartbeatInputSchema,
+  sessionSeekInputSchema,
   uuidSchema,
+  idSchema,
 } from '@mediaserver/config';
 import { generateId } from '@mediaserver/core';
+import type { SkipSegments } from '@mediaserver/core';
 import {
   watchProgress,
   playbackSessions,
@@ -23,6 +26,8 @@ import {
   desc,
   sql,
 } from '@mediaserver/db';
+import { getStreamingService } from '../services/streaming-service.js';
+import { logger } from '../lib/logger.js';
 
 /** Threshold percentage for marking as watched */
 const WATCHED_THRESHOLD = 90;
@@ -47,7 +52,8 @@ export const playbackRouter = router({
         ),
       });
 
-      return progress;
+      // Return null instead of undefined (TanStack Query requirement)
+      return progress ?? null;
     }),
 
   /**
@@ -113,66 +119,79 @@ export const playbackRouter = router({
     .mutation(async ({ ctx, input }) => {
       const { mediaType, mediaId, profile = 'original', startPosition = 0 } = input;
 
-      // Verify media exists and get file info
-      let directPlayable: boolean | null;
+      logger.info({ 
+        userId: ctx.userId, 
+        mediaType, 
+        mediaId, 
+        profile, 
+        startPosition 
+      }, '[playback.createSession] Creating session');
 
-      if (mediaType === 'movie') {
-        const movie = await ctx.db.query.movies.findFirst({
-          where: eq(movies.id, mediaId),
+      try {
+        // Get the streaming service
+        const streamingService = getStreamingService();
+        
+        // Create session via streaming service (handles probing, planning, etc.)
+        const result = await streamingService.createSession({
+          userId: ctx.userId,
+          mediaType,
+          mediaId,
+          startPosition,
+          // userAgent would come from request context in a real implementation
         });
 
-        if (!movie) {
-          throw new TRPCError({
-            code: 'NOT_FOUND',
-            message: 'Movie not found',
-          });
-        }
+        logger.info({ 
+          sessionId: result.sessionId, 
+          masterPlaylistUrl: result.masterPlaylistUrl,
+          mode: result.plan.mode,
+          directPlay: result.directPlay
+        }, '[playback.createSession] Session created via StreamingService');
 
-        directPlayable = movie.directPlayable;
-      } else {
-        const episode = await ctx.db.query.episodes.findFirst({
-          where: eq(episodes.id, mediaId),
+        // Also create a record in the playback_sessions table for tracking
+        await ctx.db.insert(playbackSessions).values({
+          id: result.sessionId,
+          userId: ctx.userId,
+          mediaType,
+          mediaId,
+          profile,
+          startPosition: result.startPosition,
+          lastHeartbeat: new Date().toISOString(),
         });
 
-        if (!episode) {
+        return {
+          sessionId: result.sessionId,
+          masterPlaylist: result.masterPlaylistUrl,
+          profile,
+          directPlay: result.directPlay,
+          startPosition: result.startPosition,
+          duration: result.duration,
+        };
+      } catch (err) {
+        logger.error({ 
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+          mediaType, 
+          mediaId 
+        }, '[playback.createSession] Failed to create session');
+        
+        // Check if it's a "not found" error
+        if (err instanceof Error && err.message.includes('not found')) {
           throw new TRPCError({
             code: 'NOT_FOUND',
-            message: 'Episode not found',
+            message: err.message,
           });
         }
-
-        directPlayable = episode.directPlayable;
+        
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: err instanceof Error ? err.message : 'Failed to create playback session',
+        });
       }
-
-      // Create session
-      const sessionId = generateId();
-      await ctx.db.insert(playbackSessions).values({
-        id: sessionId,
-        userId: ctx.userId,
-        mediaType,
-        mediaId,
-        profile,
-        startPosition,
-        lastHeartbeat: new Date().toISOString(),
-      });
-
-      // Determine if we can direct play or need to transcode
-      const canDirectPlay = profile === 'original' && directPlayable;
-
-      // Build streaming URL
-      const baseUrl = `/api/stream/${sessionId}`;
-
-      return {
-        sessionId,
-        masterPlaylist: `${baseUrl}/master.m3u8`,
-        profile,
-        directPlay: canDirectPlay ?? false,
-        startPosition,
-      };
     }),
 
   /**
    * Session heartbeat - keeps session alive and updates position.
+   * Also refreshes the in-memory streaming service session to prevent cleanup.
    */
   heartbeat: protectedProcedure
     .input(sessionHeartbeatInputSchema)
@@ -199,11 +218,23 @@ export const playbackRouter = router({
         });
       }
 
-      // Update heartbeat
+      // Update database heartbeat
       await ctx.db
         .update(playbackSessions)
         .set({ lastHeartbeat: new Date().toISOString() })
         .where(eq(playbackSessions.id, sessionId));
+
+      // Also refresh the in-memory streaming service session
+      // This prevents automatic cleanup due to inactivity
+      // Returns false if the in-memory session is gone (server restart, etc.)
+      let sessionActive = true;
+      try {
+        const streamingService = getStreamingService();
+        sessionActive = streamingService.refreshSessionAccess(sessionId);
+      } catch {
+        // Streaming service might not be initialized
+        sessionActive = false;
+      }
 
       // Update watch progress if playing
       if (isPlaying) {
@@ -262,14 +293,150 @@ export const playbackRouter = router({
         }
       }
 
-      return { success: true };
+      // Get transcoded progress so client can make better seek decisions
+      let transcodedTime = 0;
+      if (sessionActive) {
+        try {
+          const streamingService = getStreamingService();
+          transcodedTime = streamingService.getTranscodedTime(sessionId) ?? 0;
+        } catch {
+          // Non-critical - client will fall back to server-side seek if needed
+        }
+      }
+
+      // Return session status - client should recreate session if not active
+      return { 
+        success: true,
+        sessionActive, // false means server lost the session (restart, etc.) - client should recreate
+        transcodedTime, // how far FFmpeg has transcoded - helps client decide local vs server seek
+      };
+    }),
+
+  /**
+   * Seek to a new position in a playback session.
+   * For transcoded content, this restarts FFmpeg at the new position.
+   * The endpoint waits for the first segment to be ready before returning,
+   * enabling immediate playback after seek.
+   */
+  seek: protectedProcedure
+    .input(sessionSeekInputSchema)
+    .mutation(async ({ ctx, input }) => {
+      const { sessionId, position } = input;
+
+      logger.info({ sessionId, position, userId: ctx.userId }, '[playback.seek] Seek requested');
+
+      // Verify session exists and belongs to user
+      const session = await ctx.db.query.playbackSessions.findFirst({
+        where: eq(playbackSessions.id, sessionId),
+      });
+
+      if (!session) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Session not found',
+        });
+      }
+
+      if (session.userId !== ctx.userId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Session does not belong to you',
+        });
+      }
+
+      try {
+        const streamingService = getStreamingService();
+        
+        // Check if in-memory session exists before seeking
+        const memorySession = streamingService.getSession(sessionId);
+        if (!memorySession) {
+          logger.warn(
+            { sessionId, position },
+            '[playback.seek] Session exists in DB but not in memory - server may have restarted'
+          );
+          throw new TRPCError({
+            code: 'PRECONDITION_FAILED',
+            message: 'Session expired - please recreate',
+          });
+        }
+        
+        const result = await streamingService.seek(sessionId, position);
+
+        logger.info(
+          { sessionId, position, epochIndex: result.epochIndex, transcodedTime: result.transcodedTime },
+          '[playback.seek] Seek completed'
+        );
+
+        return {
+          success: true,
+          epochIndex: result.epochIndex,
+          startPosition: result.startPosition,
+          transcodedTime: result.transcodedTime,
+        };
+      } catch (err) {
+        // Re-throw TRPCErrors as-is
+        if (err instanceof TRPCError) {
+          throw err;
+        }
+        
+        logger.error(
+          { error: err instanceof Error ? err.message : String(err), sessionId, position },
+          '[playback.seek] Seek failed'
+        );
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: err instanceof Error ? err.message : 'Failed to seek',
+        });
+      }
+    }),
+
+  /**
+   * Get the current transcoded progress for a session.
+   * Returns how far the transcode has progressed (in source file time).
+   * Useful for the client to know if it needs to trigger a server-side seek.
+   */
+  getTranscodedProgress: protectedProcedure
+    .input(z.object({ sessionId: idSchema }))
+    .query(async ({ ctx, input }) => {
+      const session = await ctx.db.query.playbackSessions.findFirst({
+        where: eq(playbackSessions.id, input.sessionId),
+      });
+
+      if (!session) {
+        throw new TRPCError({
+          code: 'NOT_FOUND',
+          message: 'Session not found',
+        });
+      }
+
+      if (session.userId !== ctx.userId) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'Session does not belong to you',
+        });
+      }
+
+      try {
+        const streamingService = getStreamingService();
+        const transcodedTime = streamingService.getTranscodedTime(input.sessionId);
+
+        return {
+          sessionId: input.sessionId,
+          transcodedTime: transcodedTime ?? 0,
+        };
+      } catch {
+        return {
+          sessionId: input.sessionId,
+          transcodedTime: 0,
+        };
+      }
     }),
 
   /**
    * End a playback session.
    */
   endSession: protectedProcedure
-    .input(z.object({ sessionId: uuidSchema }))
+    .input(z.object({ sessionId: idSchema }))
     .mutation(async ({ ctx, input }) => {
       const session = await ctx.db.query.playbackSessions.findFirst({
         where: eq(playbackSessions.id, input.sessionId),
@@ -451,6 +618,135 @@ export const playbackRouter = router({
 
     return sessions;
   }),
+
+  /**
+   * Get skip segments (intro/credits) for a media item.
+   */
+  getSkipSegments: protectedProcedure
+    .input(
+      z.object({
+        mediaType: z.enum(['movie', 'episode']),
+        mediaId: uuidSchema,
+      })
+    )
+    .query(async ({ ctx, input }): Promise<SkipSegments> => {
+      const { mediaType, mediaId } = input;
+
+      if (mediaType === 'movie') {
+        const movie = await ctx.db.query.movies.findFirst({
+          where: eq(movies.id, mediaId),
+          columns: {
+            creditsStart: true,
+            duration: true,
+          },
+        });
+
+        if (!movie) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Movie not found',
+          });
+        }
+
+        // Movies only have credits, not intro
+        return {
+          credits:
+            movie.creditsStart !== null && movie.duration
+              ? { start: movie.creditsStart, end: movie.duration }
+              : undefined,
+        };
+      } else {
+        const episode = await ctx.db.query.episodes.findFirst({
+          where: eq(episodes.id, mediaId),
+          columns: {
+            introStart: true,
+            introEnd: true,
+            creditsStart: true,
+            duration: true,
+          },
+        });
+
+        if (!episode) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Episode not found',
+          });
+        }
+
+        return {
+          intro:
+            episode.introStart !== null && episode.introEnd !== null
+              ? { start: episode.introStart, end: episode.introEnd }
+              : undefined,
+          credits:
+            episode.creditsStart !== null && episode.duration
+              ? { start: episode.creditsStart, end: episode.duration }
+              : undefined,
+        };
+      }
+    }),
+
+  /**
+   * Update skip segments for a media item (admin only).
+   * Used to manually set intro/credits timestamps.
+   */
+  updateSkipSegments: adminProcedure
+    .input(
+      z.object({
+        mediaType: z.enum(['movie', 'episode']),
+        mediaId: uuidSchema,
+        introStart: z.number().min(0).nullable().optional(),
+        introEnd: z.number().min(0).nullable().optional(),
+        creditsStart: z.number().min(0).nullable().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { mediaType, mediaId, introStart, introEnd, creditsStart } = input;
+
+      if (mediaType === 'movie') {
+        const movie = await ctx.db.query.movies.findFirst({
+          where: eq(movies.id, mediaId),
+        });
+
+        if (!movie) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Movie not found',
+          });
+        }
+
+        await ctx.db
+          .update(movies)
+          .set({
+            creditsStart: creditsStart ?? null,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(movies.id, mediaId));
+      } else {
+        const episode = await ctx.db.query.episodes.findFirst({
+          where: eq(episodes.id, mediaId),
+        });
+
+        if (!episode) {
+          throw new TRPCError({
+            code: 'NOT_FOUND',
+            message: 'Episode not found',
+          });
+        }
+
+        await ctx.db
+          .update(episodes)
+          .set({
+            introStart: introStart ?? null,
+            introEnd: introEnd ?? null,
+            creditsStart: creditsStart ?? null,
+            updatedAt: new Date().toISOString(),
+          })
+          .where(eq(episodes.id, mediaId));
+      }
+
+      return { success: true };
+    }),
 });
 
 

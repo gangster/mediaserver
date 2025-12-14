@@ -194,9 +194,9 @@ export const searchInputSchema = z.object({
 /** Create session input */
 export const createSessionInputSchema = z.object({
   mediaType: mediaTypeSchema,
-  mediaId: uuidSchema,
+  mediaId: idSchema, // Media IDs can be nanoid format
   profile: qualityProfileSchema.optional(),
-  startPosition: z.number().int().min(0).optional(),
+  startPosition: z.number().min(0).optional(), // Allow floats for precise resume
 });
 
 /** Update watch progress input */
@@ -209,10 +209,16 @@ export const updateWatchProgressInputSchema = z.object({
 
 /** Session heartbeat input */
 export const sessionHeartbeatInputSchema = z.object({
-  sessionId: uuidSchema,
-  position: z.number().int().min(0),
+  sessionId: idSchema, // Session IDs use nanoid format, not UUID
+  position: z.number().min(0), // Allow floats, will be rounded server-side
   isPlaying: z.boolean(),
   buffering: z.boolean().default(false),
+});
+
+/** Session seek input - for seeking beyond transcoded content */
+export const sessionSeekInputSchema = z.object({
+  sessionId: idSchema,
+  position: z.number().min(0), // Target position in seconds (source file time)
 });
 
 // ============================================================================

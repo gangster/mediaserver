@@ -301,11 +301,13 @@ function buildHLSArgs(
   // Keep all segments (don't delete old ones)
   args.push('-hls_list_size', '0');
 
-  // Segment filename pattern
-  const segmentPattern = options.outputPath.replace('.m3u8', '_%05d.ts');
+  // Segment filename pattern - must match what transcode-session expects: segment_00000.ts
+  const outputDir = options.outputPath.substring(0, options.outputPath.lastIndexOf('/'));
+  const segmentPattern = `${outputDir}/segment_%05d.ts`;
   args.push('-hls_segment_filename', segmentPattern);
 
-  // Playlist type
+  // Playlist type - EVENT allows progressive writing while transcoding
+  // We'll append #EXT-X-ENDLIST when serving if transcoding is complete
   args.push('-hls_playlist_type', 'event');
 
   // Start at segment 0
@@ -331,7 +333,6 @@ function buildHLSArgs(
   // HLS flags
   const hlsFlags = [
     'independent_segments',
-    'iframes_only', // Remove this for normal playback
   ];
 
   // Use fMP4 or TS based on container format

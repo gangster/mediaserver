@@ -1,1 +1,0 @@
-ALTER TABLE `watch_progress` ADD `preferred_version_id` text;
